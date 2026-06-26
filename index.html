@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0a0a0f" />
+  <meta name="description" content="Eisenhower Matrix Pro — gerencie suas missões em uma interface Liquid Glass futurista. Quadrantes Fazer Agora, Agendar, Delegar e Eliminar com múltiplos quadros." />
+  <title>Eisenhower Matrix Pro — O Futuro da Produtividade</title>
+
+  <!-- Fontes -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Camadas de fundo "liquid glass" (gradientes animados atrás do vidro) -->
+  <div class="bg-field" aria-hidden="true">
+    <div class="bg-grid"></div>
+    <div class="blob blob--cyan"></div>
+    <div class="blob blob--magenta"></div>
+    <div class="blob blob--red"></div>
+    <div class="bg-vignette"></div>
+  </div>
+
+  <div id="root"></div>
+
+  <noscript>
+    <p style="color:#fff;text-align:center;padding:2rem;font-family:sans-serif">
+      Esta aplicação precisa de JavaScript habilitado.
+    </p>
+  </noscript>
+
+  <!-- React + Babel via CDN (sem build step, ideal para GitHub Pages) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+  <script type="text/babel" data-presets="react" src="app.jsx"></script>
+</body>
+</html>
