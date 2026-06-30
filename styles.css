@@ -135,12 +135,16 @@ body {
   flex-wrap: wrap;
   padding: 14px 20px;
   position: relative;
-  overflow: hidden;
+  /* z-index acima do tabuleiro para o menu de quadros abrir NA FRENTE dos quadrantes.
+     Sem overflow:hidden aqui, senão o menu (que desce abaixo da barra) era cortado. */
+  z-index: 30;
 }
 .topbar::before {
   /* gradiente animado sutil correndo pela barra (líquido luminoso) */
   content: "";
   position: absolute; inset: 0;
+  /* herda o arredondamento da barra para o brilho não vazar nos cantos */
+  border-radius: inherit;
   background: linear-gradient(120deg, transparent 30%, rgba(0, 240, 255, 0.08) 45%, rgba(255, 0, 229, 0.08) 55%, transparent 70%);
   background-size: 250% 100%;
   animation: sheen 9s linear infinite;
