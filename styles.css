@@ -682,6 +682,62 @@ body {
 .checkline span { font-family: var(--font-body); font-size: 12.5px; color: var(--text); line-height: 1.35; }
 .imgbox__hint { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); }
 
+/* --------------------------------------------- CHECKLIST (subtarefas) */
+/* indicador de progresso no card */
+.tag--check { gap: 6px; }
+.tag__bar {
+  width: 30px; height: 3px; border-radius: 3px; overflow: hidden;
+  background: color-mix(in srgb, var(--c) 22%, transparent);
+}
+.tag__bar i {
+  display: block; height: 100%;
+  background: color-mix(in srgb, var(--c) 90%, white 10%);
+  box-shadow: 0 0 6px var(--c);
+  transition: width .4s var(--ease);
+}
+.tag--check-done { background: color-mix(in srgb, #35e07f 16%, transparent); border-color: rgba(53,224,127,0.42); color: #9dfbc2; }
+.tag--check-done .tag__bar { background: rgba(53,224,127,0.22); }
+.tag--check-done .tag__bar i { background: #35e07f; box-shadow: 0 0 6px #35e07f; }
+
+/* badge no rótulo do modal */
+.field__badge {
+  margin-left: 8px; padding: 1px 7px; border-radius: 20px;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .5px;
+  color: #9fe9ff; background: rgba(0,240,255,0.12); border: 1px solid rgba(0,240,255,0.3);
+}
+
+/* lista de itens do modal */
+.checklist { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.checklist__item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 9px; border-radius: 10px;
+  background: rgba(0,0,0,0.25); border: 1px solid var(--stroke);
+  transition: border-color .2s var(--ease), opacity .2s var(--ease);
+}
+.checklist__box {
+  flex: 0 0 auto; width: 20px; height: 20px; padding: 0;
+  display: grid; place-items: center; border-radius: 6px; cursor: pointer;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid color-mix(in srgb, var(--schedule) 45%, var(--stroke));
+  color: #061018; transition: all .18s var(--ease);
+}
+.checklist__box svg { width: 13px; height: 13px; stroke-width: 3; }
+.checklist__box:hover { border-color: var(--schedule); box-shadow: 0 0 10px rgba(0,240,255,0.3); }
+.checklist__box:focus-visible { outline: 2px solid #9fe9ff; outline-offset: 2px; }
+.checklist__item.is-done .checklist__box {
+  background: linear-gradient(135deg, #35e07f, #00f0ff); border-color: transparent;
+}
+.checklist__text {
+  flex: 1; min-width: 0; font-size: 13px; color: var(--text); line-height: 1.35; word-break: break-word;
+}
+.checklist__item.is-done { opacity: .62; }
+.checklist__item.is-done .checklist__text { text-decoration: line-through; color: var(--text-dim); }
+.checklist__reorder { display: flex; flex-direction: column; flex: 0 0 auto; }
+.checklist__reorder .icon-btn { width: 22px; height: 16px; border-radius: 5px; }
+.checklist__reorder .icon-btn svg { width: 13px; height: 13px; }
+.checklist__reorder .icon-btn:disabled { opacity: .28; cursor: default; }
+.checklist__reorder .icon-btn:disabled:hover { background: rgba(255,255,255,0.05); color: var(--text-dim); }
+
 /* --------------------------------------------------------- RESPONSIVO */
 @media (max-width: 1080px) {
   .board { grid-template-columns: repeat(2, minmax(0,1fr)); }

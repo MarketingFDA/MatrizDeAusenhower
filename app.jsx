@@ -39,6 +39,8 @@ function Icon({ name, ...p }) {
     upload:   <g><path d="M12 16V4M8 8l4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></g>,
     bell:     <g><path d="M18 8.5a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></g>,
     external: <g><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></g>,
+    check:    <path d="m5 12 5 5 9-11" />,
+    checklist:<g><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3.5 5.5 1 1 2-2.5M3.5 11.5l1 1 2-2.5M3.5 17.5l1 1 2-2.5"/></g>,
   };
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
@@ -602,6 +604,9 @@ function Card({ card, quadId, onEdit, onDelete, onMoveKeyboard, dragRef }) {
   const links = Array.isArray(card.links) ? card.links : [];
   const cover = card.image && card.image.cover ? card.image.src : null;
   const hasInnerImage = card.image && !card.image.cover;
+  const checklist = Array.isArray(card.checklist) ? card.checklist : [];
+  const doneCount = checklist.filter(i => i.done).length;
+  const checkPct = checklist.length ? Math.round((doneCount / checklist.length) * 100) : 0;
 
   const handleDelete = () => { setRemoving(true); setTimeout(onDelete, 260); };
 
@@ -661,6 +666,13 @@ function Card({ card, quadId, onEdit, onDelete, onMoveKeyboard, dragRef }) {
           ? <span className={`tag ${due.soon ? "tag--due-soon" : ""}`}><Icon name="calendar" /> {due.label} · {due.rel}</span>
           : <span className="tag" style={{ opacity: .7 }}><Icon name="clock" /> sem prazo</span>}
         {hasInnerImage && <span className="tag" title="Contém imagem"><Icon name="image" /> imagem</span>}
+        {checklist.length > 0 && (
+          <span className={`tag tag--check ${doneCount === checklist.length ? "tag--check-done" : ""}`}
+                title={`Checklist: ${doneCount} de ${checklist.length} concluídos`}>
+            <Icon name="check" /> {doneCount}/{checklist.length}
+            <span className="tag__bar" aria-hidden="true"><i style={{ width: `${checkPct}%` }} /></span>
+          </span>
+        )}
       </div>
     </article>
   );
@@ -679,9 +691,29 @@ function CardModal({ editor, onClose, onSave, onChangeQuadrant }) {
   const [image, setImage] = useState(c.image || null); // {src, cover}
   const [imgUrl, setImgUrl] = useState("");
   const [imgBusy, setImgBusy] = useState(false);
+  const [checklist, setChecklist] = useState(Array.isArray(c.checklist) ? c.checklist : []);
+  const [checkText, setCheckText] = useState("");
   const [error, setError] = useState("");
   const firstRef = useRef(null);
   const fileRef = useRef(null);
+
+  const addCheckItem = () => {
+    const text = checkText.trim();
+    if (!text) return;
+    setChecklist(cs => [...cs, { id: uid(), text, done: false }]);
+    setCheckText("");
+  };
+  const toggleCheckItem = (id) =>
+    setChecklist(cs => cs.map(i => (i.id === id ? { ...i, done: !i.done } : i)));
+  const removeCheckItem = (id) => setChecklist(cs => cs.filter(i => i.id !== id));
+  const moveCheckItem = (id, dir) => setChecklist(cs => {
+    const i = cs.findIndex(x => x.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= cs.length) return cs;
+    const next = [...cs];
+    [next[i], next[j]] = [next[j], next[i]];
+    return next;
+  });
 
   const addLink = () => {
     const url = normalizeUrl(linkUrl);
@@ -721,7 +753,7 @@ function CardModal({ editor, onClose, onSave, onChangeQuadrant }) {
   const submit = (e) => {
     e.preventDefault();
     if (!title.trim()) { setError("Dê um título à missão."); return; }
-    onSave({ title: title.trim(), description: description.trim(), due, links, image });
+    onSave({ title: title.trim(), description: description.trim(), due, links, image, checklist });
   };
 
   return (
@@ -749,6 +781,49 @@ function CardModal({ editor, onClose, onSave, onChangeQuadrant }) {
           <textarea id="f-desc" className="textarea" value={description}
                     onChange={e => setDescription(e.target.value)}
                     placeholder="Detalhes, contexto, critérios de conclusão..." maxLength={600} />
+        </div>
+
+        <div className="field">
+          <label>
+            Checklist
+            {checklist.length > 0 && (
+              <span className="field__badge">
+                {checklist.filter(i => i.done).length}/{checklist.length}
+              </span>
+            )}
+          </label>
+          {checklist.length > 0 && (
+            <ul className="checklist">
+              {checklist.map((item, idx) => (
+                <li key={item.id} className={`checklist__item ${item.done ? "is-done" : ""}`}>
+                  <button type="button" className="checklist__box" role="checkbox" aria-checked={item.done}
+                          aria-label={item.done ? "Marcar como não concluído" : "Marcar como concluído"}
+                          onClick={() => toggleCheckItem(item.id)}>
+                    {item.done && <Icon name="check" />}
+                  </button>
+                  <span className="checklist__text">{item.text}</span>
+                  <span className="checklist__reorder">
+                    <button type="button" className="icon-btn" aria-label="Mover para cima"
+                            disabled={idx === 0} onClick={() => moveCheckItem(item.id, -1)}>
+                      <Icon name="chevron" style={{ transform: "rotate(180deg)" }} />
+                    </button>
+                    <button type="button" className="icon-btn" aria-label="Mover para baixo"
+                            disabled={idx === checklist.length - 1} onClick={() => moveCheckItem(item.id, 1)}>
+                      <Icon name="chevron" />
+                    </button>
+                  </span>
+                  <button type="button" className="icon-btn icon-btn--danger" aria-label="Remover item"
+                          onClick={() => removeCheckItem(item.id)}><Icon name="x" /></button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="inline-add">
+            <input className="input" value={checkText} placeholder="Nova subtarefa" maxLength={140}
+                   onChange={e => setCheckText(e.target.value)}
+                   onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addCheckItem(); } }} />
+            <button type="button" className="btn btn--ghost" onClick={addCheckItem}><Icon name="plus" /> Adicionar</button>
+          </div>
         </div>
 
         <div className="field">
