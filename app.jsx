@@ -16,6 +16,23 @@ const QUADRANTS = [
 ];
 const QUAD_IDS = QUADRANTS.map(q => q.id);
 
+/* Prazo (ms) para excluir automaticamente um card concluído: 48 horas. */
+const COMPLETE_TTL = 48 * 60 * 60 * 1000;
+
+/* Paleta de 10 cores para as tags. */
+const TAG_COLORS = [
+  "#ff3b3b", "#ff7a18", "#ffc531", "#35e07f", "#00f0ff",
+  "#2d7bff", "#b85cff", "#ff00e5", "#ff5c8a", "#8a9bb0",
+];
+
+/* Escolhe texto preto ou branco conforme o brilho da cor de fundo (contraste). */
+function textOn(hex) {
+  const c = (hex || "#888").replace("#", "");
+  const r = parseInt(c.slice(0, 2), 16), g = parseInt(c.slice(2, 4), 16), b = parseInt(c.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.62 ? "#0a0a0f" : "#ffffff";
+}
+
 const uid = () =>
   (Date.now().toString(36) + Math.random().toString(36).slice(2, 7)).toUpperCase();
 
@@ -41,6 +58,9 @@ function Icon({ name, ...p }) {
     external: <g><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></g>,
     check:    <path d="m5 12 5 5 9-11" />,
     checklist:<g><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3.5 5.5 1 1 2-2.5M3.5 11.5l1 1 2-2.5M3.5 17.5l1 1 2-2.5"/></g>,
+    checkCircle:<g><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/></g>,
+    undo:     <g><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10H9"/></g>,
+    tag:      <g><path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9-9-9Z"/><circle cx="7.5" cy="7.5" r="1.3"/></g>,
   };
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
@@ -53,14 +73,17 @@ function Icon({ name, ...p }) {
 /* ------------------------------------------------------------- persistência */
 function defaultState() {
   const boardId = uid();
+  const tReuniao = { id: uid(), title: "Reunião", color: "#2d7bff" };
+  const tFradema = { id: uid(), title: "Fradema", color: "#00f0ff" };
   return {
     activeBoardId: boardId,
+    tags: [tReuniao, tFradema],
     boards: [{
       id: boardId,
       name: "Meu Quadro",
       cards: {
-        do: [ demoCard("Aprovar campanha urgente", "Revisar e liberar a peça antes do prazo final.", soon(1)) ],
-        schedule: [ demoCard("Planejar conteúdo do mês", "Definir o calendário editorial das redes.", soon(9)) ],
+        do: [ { ...demoCard("Aprovar campanha urgente", "Revisar e liberar a peça antes do prazo final.", soon(1)), tags: [tFradema.id] } ],
+        schedule: [ { ...demoCard("Planejar conteúdo do mês", "Definir o calendário editorial das redes.", soon(9)), tags: [tReuniao.id] } ],
         delegate: [ demoCard("Encaminhar briefing ao time", "Repassar o material para execução.", "") ],
         eliminate: [],
       },
@@ -81,6 +104,7 @@ function loadState() {
     if (!raw) return defaultState();
     const parsed = JSON.parse(raw);
     if (!parsed.boards || !parsed.boards.length) return defaultState();
+    if (!Array.isArray(parsed.tags)) parsed.tags = []; // biblioteca de tags (defensivo)
     // sanea: garante os 4 quadrantes em cada quadro
     parsed.boards.forEach(b => {
       b.cards = b.cards || {};
@@ -241,6 +265,7 @@ function App() {
     () => ("Notification" in window ? Notification.permission : "unsupported")
   );
   const [bannerHidden, setBannerHidden] = useState(false);
+  const [tagFilter, setTagFilter] = useState([]); // ids de tags para filtrar o quadro
   const dragRef = useRef(null); // {cardId, from}
 
   /* persistência */
@@ -267,6 +292,9 @@ function App() {
   }, [notifPerm]);
 
   const board = state.boards.find(b => b.id === state.activeBoardId) || state.boards[0];
+  const tags = state.tags || [];
+  const tagById = useMemo(() => Object.fromEntries(tags.map(t => [t.id, t])), [tags]);
+  const activeFilter = tagFilter.filter(id => tagById[id]); // ignora tags removidas
 
   const flash = useCallback((msg) => {
     setToast({ id: uid(), msg });
@@ -311,6 +339,65 @@ function App() {
     }));
     flash("Card removido");
   }, [board, updateBoard, flash]);
+
+  /* marcar/desmarcar concluído (registra completedAt; desfazer zera) */
+  const toggleComplete = useCallback((quadrant, cardId) => {
+    const cur = (board.cards[quadrant] || []).find(c => c.id === cardId);
+    const willComplete = !(cur && cur.completedAt);
+    updateBoard(board.id, b => ({
+      ...b,
+      cards: {
+        ...b.cards,
+        [quadrant]: b.cards[quadrant].map(c =>
+          c.id === cardId ? { ...c, completedAt: willComplete ? Date.now() : null } : c),
+      },
+    }));
+    flash(willComplete ? "Concluído. Some da lista em 48h." : "Conclusão desfeita");
+  }, [board, updateBoard, flash]);
+
+  /* varredura das 48h: roda ao abrir e a cada minuto enquanto a página está aberta.
+     Limitação web: só executa quando alguém tem a Matriz aberta no navegador. */
+  useEffect(() => {
+    const sweep = () => setState(s => {
+      const now = Date.now();
+      let changed = false;
+      const boards = s.boards.map(b => {
+        let bChanged = false;
+        const cards = {};
+        QUAD_IDS.forEach(q => {
+          const kept = b.cards[q].filter(c => !(c.completedAt && now - c.completedAt >= COMPLETE_TTL));
+          if (kept.length !== b.cards[q].length) { bChanged = true; changed = true; }
+          cards[q] = kept;
+        });
+        return bChanged ? { ...b, cards } : b;
+      });
+      return changed ? { ...s, boards } : s; // mantém referência se nada mudou (sem re-render)
+    });
+    sweep();
+    const iv = setInterval(sweep, 60000);
+    return () => clearInterval(iv);
+  }, []);
+
+  /* ---- biblioteca de tags (global, reutilizável em qualquer card/quadro) ---- */
+  const createTag = useCallback((title, color) => {
+    const id = uid();
+    setState(s => ({ ...s, tags: [...(s.tags || []), { id, title: title.trim(), color }] }));
+    return id;
+  }, []);
+  const updateTag = useCallback((id, patch) => {
+    setState(s => ({ ...s, tags: (s.tags || []).map(t => (t.id === id ? { ...t, ...patch } : t)) }));
+  }, []);
+  const deleteTag = useCallback((id) => {
+    setState(s => ({
+      ...s,
+      tags: (s.tags || []).filter(t => t.id !== id),
+      boards: s.boards.map(b => ({
+        ...b,
+        cards: Object.fromEntries(QUAD_IDS.map(q =>
+          [q, b.cards[q].map(c => (c.tags ? { ...c, tags: c.tags.filter(tid => tid !== id) } : c))])),
+      })),
+    }));
+  }, []);
 
   const moveCard = useCallback((cardId, from, to, index = null) => {
     if (from === to && index === null) return;
@@ -391,15 +478,27 @@ function App() {
         />
       )}
 
+      {tags.length > 0 && (
+        <TagFilterBar
+          tags={tags}
+          active={activeFilter}
+          onToggle={(id) => setTagFilter(f => f.includes(id) ? f.filter(x => x !== id) : [...f, id])}
+          onClear={() => setTagFilter([])}
+        />
+      )}
+
       <main className="board" aria-label={`Quadro ${board.name}`}>
         {QUADRANTS.map(q => (
           <Column
             key={q.id}
             quad={q}
             cards={board.cards[q.id]}
+            tagById={tagById}
+            filter={activeFilter}
             onAdd={() => setEditor({ mode: "create", quadrant: q.id })}
             onEdit={(card) => setEditor({ mode: "edit", quadrant: q.id, card })}
             onDelete={(cardId) => deleteCard(q.id, cardId)}
+            onToggleComplete={(cardId) => toggleComplete(q.id, cardId)}
             onMoveKeyboard={(cardId, dir) => {
               const i = QUAD_IDS.indexOf(q.id);
               const target = QUAD_IDS[i + dir];
@@ -418,6 +517,10 @@ function App() {
       {editor && (
         <CardModal
           editor={editor}
+          tags={tags}
+          onCreateTag={createTag}
+          onUpdateTag={updateTag}
+          onDeleteTag={deleteTag}
           onClose={() => setEditor(null)}
           onSave={saveCard}
           onChangeQuadrant={(qid) => setEditor(e => ({ ...e, quadrant: qid }))}
@@ -440,6 +543,35 @@ function App() {
         {toast && <div className="toast" key={toast.id}><span className="dot" />{toast.msg}</div>}
       </div>
     </div>
+  );
+}
+
+/* ------------------------------------------------------ BARRA DE FILTRO TAG */
+function TagFilterBar({ tags, active, onToggle, onClear }) {
+  return (
+    <section className="tagfilter glass" aria-label="Filtrar por tag">
+      <span className="tagfilter__label"><Icon name="tag" width="14" height="14" /> Filtrar</span>
+      <div className="tagfilter__list">
+        {tags.map(t => {
+          const on = active.includes(t.id);
+          return (
+            <button key={t.id} type="button" className={`tagchip ${on ? "is-on" : ""}`}
+                    aria-pressed={on}
+                    style={on ? { background: t.color, color: textOn(t.color), borderColor: "transparent", boxShadow: `0 0 12px ${t.color}66` }
+                              : { color: t.color, borderColor: `${t.color}66` }}
+                    onClick={() => onToggle(t.id)}>
+              <span className="tagchip__dot" style={{ background: t.color }} />
+              {t.title}
+            </button>
+          );
+        })}
+      </div>
+      {active.length > 0 && (
+        <button type="button" className="btn btn--ghost tagfilter__clear" onClick={onClear}>
+          <Icon name="x" /> Limpar
+        </button>
+      )}
+    </section>
   );
 }
 
@@ -543,11 +675,16 @@ function Topbar({ board, boards, menuOpen, setMenuOpen, onSwitch, onNewBoard, on
 }
 
 /* ----------------------------------------------------------------- COLUNA */
-function Column({ quad, cards, onAdd, onEdit, onDelete, onMoveKeyboard, dragRef, onDropCard }) {
+function Column({ quad, cards, tagById, filter, onAdd, onEdit, onDelete, onToggleComplete, onMoveKeyboard, dragRef, onDropCard }) {
   const [over, setOver] = useState(false);
   const count = useCountUp(cards.length);
   const maxRef = useRef(1);
   maxRef.current = Math.max(maxRef.current, cards.length, 1);
+
+  const hasFilter = filter && filter.length > 0;
+  const visible = hasFilter
+    ? cards.filter(c => (c.tags || []).some(id => filter.includes(id)))
+    : cards;
 
   const onDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (!over) setOver(true); };
   const onDragLeave = (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOver(false); };
@@ -576,17 +713,21 @@ function Column({ quad, cards, onAdd, onEdit, onDelete, onMoveKeyboard, dragRef,
       </button>
 
       <div className="column__list">
-        {cards.length === 0 && !over && (
-          <div className="column__empty">Sem missões neste quadrante</div>
+        {visible.length === 0 && !over && (
+          <div className="column__empty">
+            {hasFilter ? "Nenhum card com essa tag" : "Sem missões neste quadrante"}
+          </div>
         )}
         <div className="column__drop-hint">soltar aqui ↓</div>
-        {cards.map(card => (
+        {visible.map(card => (
           <Card
             key={card.id}
             card={card}
             quadId={quad.id}
+            tagById={tagById}
             onEdit={() => onEdit(card)}
             onDelete={() => onDelete(card.id)}
+            onToggleComplete={() => onToggleComplete(card.id)}
             onMoveKeyboard={(dir) => onMoveKeyboard(card.id, dir)}
             dragRef={dragRef}
           />
@@ -597,7 +738,7 @@ function Column({ quad, cards, onAdd, onEdit, onDelete, onMoveKeyboard, dragRef,
 }
 
 /* ------------------------------------------------------------------- CARD */
-function Card({ card, quadId, onEdit, onDelete, onMoveKeyboard, dragRef }) {
+function Card({ card, quadId, tagById, onEdit, onDelete, onToggleComplete, onMoveKeyboard, dragRef }) {
   const [dragging, setDragging] = useState(false);
   const [removing, setRemoving] = useState(false);
   const due = formatDue(card.due);
@@ -607,6 +748,9 @@ function Card({ card, quadId, onEdit, onDelete, onMoveKeyboard, dragRef }) {
   const checklist = Array.isArray(card.checklist) ? card.checklist : [];
   const doneCount = checklist.filter(i => i.done).length;
   const checkPct = checklist.length ? Math.round((doneCount / checklist.length) * 100) : 0;
+  const cardTags = (card.tags || []).map(id => (tagById || {})[id]).filter(Boolean);
+  const done = !!card.completedAt;
+  const hoursLeft = done ? Math.max(0, Math.ceil((COMPLETE_TTL - (Date.now() - card.completedAt)) / 3600000)) : 0;
 
   const handleDelete = () => { setRemoving(true); setTimeout(onDelete, 260); };
 
@@ -623,17 +767,18 @@ function Card({ card, quadId, onEdit, onDelete, onMoveKeyboard, dragRef }) {
     else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); handleDelete(); }
     else if (e.key === "ArrowRight") { e.preventDefault(); onMoveKeyboard(1); }
     else if (e.key === "ArrowLeft") { e.preventDefault(); onMoveKeyboard(-1); }
+    else if (e.key === "c" || e.key === "C") { e.preventDefault(); onToggleComplete(); }
   };
 
   return (
     <article
-      className={`card ${dragging ? "dragging" : ""} ${removing ? "removing" : ""} ${cover ? "card--has-cover" : ""}`}
+      className={`card ${dragging ? "dragging" : ""} ${removing ? "removing" : ""} ${cover ? "card--has-cover" : ""} ${done ? "card--done" : ""}`}
       draggable={!removing}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       tabIndex={0}
       onKeyDown={onKeyDown}
-      aria-label={`Card: ${card.title}. Enter para editar, Delete para excluir, setas esquerda/direita para mover de quadrante.`}
+      aria-label={`Card: ${card.title}.${done ? " Concluído." : ""} Enter para editar, C para ${done ? "reabrir" : "concluir"}, Delete para excluir, setas esquerda/direita para mover de quadrante.`}
     >
       {cover && (
         <div className="card__cover" style={{ backgroundImage: `url(${cover})` }} role="img"
@@ -645,10 +790,31 @@ function Card({ card, quadId, onEdit, onDelete, onMoveKeyboard, dragRef }) {
         <span className="card__grip" aria-hidden="true"><Icon name="grip" /></span>
         <h3 className="card__title">{card.title}</h3>
         <div className="card__actions">
+          <button className={`icon-btn ${done ? "icon-btn--done" : "icon-btn--go"}`}
+                  aria-label={done ? "Reabrir card (desfazer conclusão)" : "Marcar como concluído"}
+                  title={done ? "Reabrir" : "Marcar como concluído"}
+                  onClick={onToggleComplete}>
+            <Icon name={done ? "undo" : "checkCircle"} />
+          </button>
           <button className="icon-btn" aria-label="Editar card" onClick={onEdit}><Icon name="edit" /></button>
           <button className="icon-btn icon-btn--danger" aria-label="Excluir card" onClick={handleDelete}><Icon name="x" /></button>
         </div>
       </div>
+      {done && (
+        <div className="card__done-flag">
+          <Icon name="check" /> Concluído
+          <span className="card__done-eta">some em ~{hoursLeft}h</span>
+        </div>
+      )}
+      {cardTags.length > 0 && (
+        <div className="card__tags">
+          {cardTags.map(t => (
+            <span key={t.id} className="pilltag" style={{ background: t.color, color: textOn(t.color), boxShadow: `0 0 10px ${t.color}55` }}>
+              {t.title}
+            </span>
+          ))}
+        </div>
+      )}
       {card.description && <p className="card__desc">{card.description}</p>}
       {links.length > 0 && (
         <div className="card__links">
@@ -679,11 +845,15 @@ function Card({ card, quadId, onEdit, onDelete, onMoveKeyboard, dragRef }) {
 }
 
 /* ----------------------------------------------------------- MODAL DE CARD */
-function CardModal({ editor, onClose, onSave, onChangeQuadrant }) {
+function CardModal({ editor, tags, onCreateTag, onUpdateTag, onDeleteTag, onClose, onSave, onChangeQuadrant }) {
   const isEdit = editor.mode === "edit";
   const c = editor.card || {};
   const [title, setTitle] = useState(c.title || "");
   const [description, setDescription] = useState(c.description || "");
+  const [cardTags, setCardTags] = useState(Array.isArray(c.tags) ? c.tags : []);
+  const [tagTitle, setTagTitle] = useState("");
+  const [tagColor, setTagColor] = useState(TAG_COLORS[4]);
+  const [editingTag, setEditingTag] = useState(null); // id da tag em edição
   const [due, setDue] = useState(c.due || "");
   const [links, setLinks] = useState(Array.isArray(c.links) ? c.links : []);
   const [linkUrl, setLinkUrl] = useState("");
@@ -743,6 +913,29 @@ function CardModal({ editor, onClose, onSave, onChangeQuadrant }) {
   const removeImage = () => setImage(null);
   const toggleCover = () => setImage(img => (img ? { ...img, cover: !img.cover } : img));
 
+  /* tags: aplicar/retirar no card e gerir a biblioteca global */
+  const toggleCardTag = (id) =>
+    setCardTags(ts => (ts.includes(id) ? ts.filter(x => x !== id) : [...ts, id]));
+  const submitTag = () => {
+    const t = tagTitle.trim();
+    if (!t) return;
+    if (editingTag) {
+      onUpdateTag(editingTag, { title: t, color: tagColor });
+      setEditingTag(null);
+    } else {
+      const id = onCreateTag(t, tagColor);
+      setCardTags(ts => (ts.includes(id) ? ts : [...ts, id])); // aplica ao card ao criar
+    }
+    setTagTitle("");
+  };
+  const startEditTag = (tag) => { setEditingTag(tag.id); setTagTitle(tag.title); setTagColor(tag.color); };
+  const cancelEditTag = () => { setEditingTag(null); setTagTitle(""); };
+  const removeTagFromLib = (id) => {
+    onDeleteTag(id);
+    setCardTags(ts => ts.filter(x => x !== id));
+    if (editingTag === id) cancelEditTag();
+  };
+
   useEffect(() => { firstRef.current && firstRef.current.focus(); }, []);
   useEffect(() => {
     const onKey = e => { if (e.key === "Escape") onClose(); };
@@ -753,7 +946,7 @@ function CardModal({ editor, onClose, onSave, onChangeQuadrant }) {
   const submit = (e) => {
     e.preventDefault();
     if (!title.trim()) { setError("Dê um título à missão."); return; }
-    onSave({ title: title.trim(), description: description.trim(), due, links, image, checklist });
+    onSave({ title: title.trim(), description: description.trim(), due, links, image, checklist, tags: cardTags });
   };
 
   return (
@@ -781,6 +974,58 @@ function CardModal({ editor, onClose, onSave, onChangeQuadrant }) {
           <textarea id="f-desc" className="textarea" value={description}
                     onChange={e => setDescription(e.target.value)}
                     placeholder="Detalhes, contexto, critérios de conclusão..." maxLength={600} />
+        </div>
+
+        <div className="field">
+          <label>Tags</label>
+          {tags.length > 0 && (
+            <div className="taglib">
+              {tags.map(t => {
+                const on = cardTags.includes(t.id);
+                return (
+                  <span key={t.id} className={`taglib__item ${on ? "is-on" : ""}`}>
+                    <button type="button" className="pilltag pilltag--btn"
+                            aria-pressed={on}
+                            style={{ background: on ? t.color : "transparent",
+                                     color: on ? textOn(t.color) : t.color,
+                                     borderColor: t.color,
+                                     boxShadow: on ? `0 0 10px ${t.color}55` : "none" }}
+                            onClick={() => toggleCardTag(t.id)}
+                            title={on ? "Remover do card" : "Aplicar ao card"}>
+                      {on && <Icon name="check" width="12" height="12" />} {t.title}
+                    </button>
+                    <button type="button" className="taglib__mini" aria-label={`Editar tag ${t.title}`}
+                            onClick={() => startEditTag(t)}><Icon name="edit" /></button>
+                    <button type="button" className="taglib__mini taglib__mini--danger" aria-label={`Excluir tag ${t.title}`}
+                            onClick={() => removeTagFromLib(t.id)}><Icon name="x" /></button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+          <div className="tagmake">
+            <div className="tagmake__swatches" role="group" aria-label="Escolher cor da tag">
+              {TAG_COLORS.map(col => (
+                <button type="button" key={col}
+                        className={`swatchbtn ${tagColor === col ? "is-sel" : ""}`}
+                        style={{ background: col }}
+                        aria-label={`Cor ${col}`} aria-pressed={tagColor === col}
+                        onClick={() => setTagColor(col)} />
+              ))}
+            </div>
+            <div className="inline-add">
+              <input className="input" value={tagTitle} maxLength={24}
+                     placeholder={editingTag ? "Editar título da tag" : "Título da nova tag (ex.: Reunião)"}
+                     onChange={e => setTagTitle(e.target.value)}
+                     onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); submitTag(); } }} />
+              <button type="button" className="btn btn--ghost" onClick={submitTag}>
+                <Icon name={editingTag ? "check" : "plus"} /> {editingTag ? "Salvar" : "Criar tag"}
+              </button>
+              {editingTag && (
+                <button type="button" className="btn btn--ghost" onClick={cancelEditTag}>Cancelar</button>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="field">

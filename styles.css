@@ -738,6 +738,87 @@ body {
 .checklist__reorder .icon-btn:disabled { opacity: .28; cursor: default; }
 .checklist__reorder .icon-btn:disabled:hover { background: rgba(255,255,255,0.05); color: var(--text-dim); }
 
+/* ------------------------------------------------- CONCLUIR + 48H */
+.icon-btn--go:hover { color: #9dfbc2; background: rgba(53,224,127,0.16); }
+.icon-btn--done { color: #9dfbc2; background: rgba(53,224,127,0.16); }
+.icon-btn--done:hover { color: #ffd27a; background: rgba(255,199,49,0.16); }
+
+.card--done { opacity: .58; filter: saturate(.7); }
+.card--done .card__title { text-decoration: line-through; color: var(--text-dim); }
+.card--done:hover { opacity: .8; }
+.card--done .card__actions { opacity: 1; } /* botão reabrir sempre visível */
+.card__done-flag {
+  display: inline-flex; align-items: center; gap: 7px;
+  margin: 9px 0 2px; padding: 4px 10px; border-radius: 8px;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .4px;
+  color: #9dfbc2; background: rgba(53,224,127,0.14); border: 1px solid rgba(53,224,127,0.4);
+}
+.card__done-flag svg { width: 12px; height: 12px; stroke-width: 3; }
+.card__done-eta { color: var(--text-faint); }
+
+/* ---------------------------------------------------------- TAGS */
+.card__tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.pilltag {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 999px;
+  font-family: var(--font-body); font-weight: 600; font-size: 11px; letter-spacing: .2px;
+  border: 1px solid transparent; white-space: nowrap;
+}
+
+/* barra de filtro por tag */
+.tagfilter {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 16px;
+}
+.tagfilter__label {
+  display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--text-faint);
+}
+.tagfilter__list { display: flex; flex-wrap: wrap; gap: 7px; flex: 1; min-width: 0; }
+.tagchip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 11px; border-radius: 999px; cursor: pointer;
+  background: transparent; border: 1px solid var(--stroke);
+  font-family: var(--font-body); font-weight: 600; font-size: 11.5px;
+  transition: transform .15s var(--ease), box-shadow .2s var(--ease);
+}
+.tagchip:hover { transform: translateY(-1px); }
+.tagchip:focus-visible { outline: 2px solid #9fe9ff; outline-offset: 2px; }
+.tagchip__dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.tagchip.is-on .tagchip__dot { display: none; }
+.tagfilter__clear { flex: 0 0 auto; padding: 6px 12px; }
+
+/* seção de tags no modal */
+.taglib { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.taglib__item { display: inline-flex; align-items: center; }
+.pilltag--btn {
+  cursor: pointer; border-width: 1px; border-style: solid;
+  transition: transform .15s var(--ease), box-shadow .2s var(--ease);
+}
+.pilltag--btn:hover { transform: translateY(-1px); }
+.pilltag--btn:focus-visible { outline: 2px solid #9fe9ff; outline-offset: 2px; }
+.taglib__mini {
+  width: 22px; height: 22px; margin-left: 2px;
+  display: grid; place-items: center; border-radius: 6px; cursor: pointer;
+  background: rgba(255,255,255,0.04); border: 1px solid transparent; color: var(--text-faint);
+  transition: all .16s var(--ease);
+}
+.taglib__mini svg { width: 12px; height: 12px; }
+.taglib__mini:hover { color: #fff; background: rgba(255,255,255,0.12); }
+.taglib__mini--danger:hover { color: #ff8a8a; background: rgba(255,59,59,0.16); }
+
+.tagmake { display: flex; flex-direction: column; gap: 10px; }
+.tagmake__swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.swatchbtn {
+  width: 26px; height: 26px; border-radius: 8px; cursor: pointer;
+  border: 2px solid rgba(255,255,255,0.14);
+  transition: transform .15s var(--ease), box-shadow .2s var(--ease);
+}
+.swatchbtn:hover { transform: scale(1.12); }
+.swatchbtn.is-sel { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,0.25), 0 0 12px currentColor; transform: scale(1.12); }
+.swatchbtn:focus-visible { outline: 2px solid #9fe9ff; outline-offset: 2px; }
+
 /* --------------------------------------------------------- RESPONSIVO */
 @media (max-width: 1080px) {
   .board { grid-template-columns: repeat(2, minmax(0,1fr)); }
