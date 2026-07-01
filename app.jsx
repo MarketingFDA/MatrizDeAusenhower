@@ -16,8 +16,11 @@ const QUADRANTS = [
 ];
 const QUAD_IDS = QUADRANTS.map(q => q.id);
 
-/* Prazo (ms) para excluir automaticamente um card concluído: 48 horas. */
+/* Prazo (ms) para mandar automaticamente um card concluído para a lixeira: 48 horas. */
 const COMPLETE_TTL = 48 * 60 * 60 * 1000;
+
+/* Prazo (ms) que um card fica na lixeira antes do expurgo definitivo: 7 dias. */
+const TRASH_TTL = 7 * 24 * 60 * 60 * 1000;
 
 /* Paleta de 10 cores para as tags. */
 const TAG_COLORS = [
@@ -78,6 +81,7 @@ function defaultState() {
   return {
     activeBoardId: boardId,
     tags: [tReuniao, tFradema],
+    trash: [],
     boards: [{
       id: boardId,
       name: "Meu Quadro",
@@ -105,6 +109,7 @@ function loadState() {
     const parsed = JSON.parse(raw);
     if (!parsed.boards || !parsed.boards.length) return defaultState();
     if (!Array.isArray(parsed.tags)) parsed.tags = []; // biblioteca de tags (defensivo)
+    if (!Array.isArray(parsed.trash)) parsed.trash = []; // lixeira (defensivo, sem migração)
     // sanea: garante os 4 quadrantes em cada quadro
     parsed.boards.forEach(b => {
       b.cards = b.cards || {};
@@ -134,6 +139,30 @@ function formatDue(due) {
   else if (diff < 0) rel = `${Math.abs(diff)}d atrás`;
   else rel = `em ${diff}d`;
   return { label, rel, soon: diff <= 1 };
+}
+
+/* Tempo que falta para o expurgo definitivo de um item na lixeira. */
+function purgeLeft(deletedAt) {
+  const ms = TRASH_TTL - (Date.now() - (deletedAt || 0));
+  if (ms <= 0) return "some na próxima abertura";
+  const days = Math.floor(ms / 86400000);
+  const hours = Math.floor((ms % 86400000) / 3600000);
+  if (days >= 1) return `some em ~${days} ${days === 1 ? "dia" : "dias"}`;
+  if (hours >= 1) return `some em ~${hours} h`;
+  const mins = Math.max(1, Math.floor(ms / 60000));
+  return `some em ~${mins} min`;
+}
+
+/* Há quanto tempo o item foi para a lixeira (texto curto). */
+function deletedAgo(deletedAt) {
+  const ms = Date.now() - (deletedAt || 0);
+  const days = Math.floor(ms / 86400000);
+  const hours = Math.floor(ms / 3600000);
+  const mins = Math.floor(ms / 60000);
+  if (days >= 1) return `há ${days} ${days === 1 ? "dia" : "dias"}`;
+  if (hours >= 1) return `há ${hours} h`;
+  if (mins >= 1) return `há ${mins} min`;
+  return "agora mesmo";
 }
 
 /* ------------------------------------------------- datas / lembretes / mídia */
@@ -266,6 +295,7 @@ function App() {
   );
   const [bannerHidden, setBannerHidden] = useState(false);
   const [tagFilter, setTagFilter] = useState([]); // ids de tags para filtrar o quadro
+  const [trashOpen, setTrashOpen] = useState(false); // painel da lixeira
   const dragRef = useRef(null); // {cardId, from}
 
   /* persistência */
@@ -332,13 +362,61 @@ function App() {
     setEditor(null);
   }, [editor, board, updateBoard, flash]);
 
+  /* excluir = mandar para a lixeira (guarda origem e quando; permite restaurar) */
   const deleteCard = useCallback((quadrant, cardId) => {
-    updateBoard(board.id, b => ({
-      ...b,
-      cards: { ...b.cards, [quadrant]: b.cards[quadrant].filter(c => c.id !== cardId) },
-    }));
-    flash("Card removido");
-  }, [board, updateBoard, flash]);
+    setState(s => {
+      const b = s.boards.find(x => x.id === board.id);
+      if (!b) return s;
+      const card = (b.cards[quadrant] || []).find(c => c.id === cardId);
+      if (!card) return s;
+      const entry = {
+        id: uid(),
+        card: { ...card, completedAt: null },
+        boardId: b.id, boardName: b.name, quadrant,
+        deletedAt: Date.now(), reason: "deleted",
+      };
+      return {
+        ...s,
+        boards: s.boards.map(x => x.id === b.id
+          ? { ...x, cards: { ...x.cards, [quadrant]: x.cards[quadrant].filter(c => c.id !== cardId) } }
+          : x),
+        trash: [entry, ...(s.trash || [])],
+      };
+    });
+    flash("Enviado para a lixeira");
+  }, [board, flash]);
+
+  /* restaurar um item da lixeira no quadro/quadrante de origem (ou no ativo, se o quadro sumiu) */
+  const restoreFromTrash = useCallback((entryId) => {
+    setState(s => {
+      const entry = (s.trash || []).find(t => t.id === entryId);
+      if (!entry) return s;
+      let target = s.boards.find(b => b.id === entry.boardId)
+                || s.boards.find(b => b.id === s.activeBoardId)
+                || s.boards[0];
+      const quad = QUAD_IDS.includes(entry.quadrant) ? entry.quadrant : "do";
+      return {
+        ...s,
+        boards: s.boards.map(b => b.id === target.id
+          ? { ...b, cards: { ...b.cards, [quad]: [{ ...entry.card, completedAt: null }, ...b.cards[quad]] } }
+          : b),
+        trash: s.trash.filter(t => t.id !== entryId),
+      };
+    });
+    flash("Card restaurado");
+  }, [flash]);
+
+  /* apagar definitivamente um item da lixeira (na hora) */
+  const purgeFromTrash = useCallback((entryId) => {
+    setState(s => ({ ...s, trash: (s.trash || []).filter(t => t.id !== entryId) }));
+    flash("Apagado definitivamente");
+  }, [flash]);
+
+  /* esvaziar a lixeira inteira */
+  const emptyTrash = useCallback(() => {
+    setState(s => ({ ...s, trash: [] }));
+    flash("Lixeira esvaziada");
+  }, [flash]);
 
   /* marcar/desmarcar concluído (registra completedAt; desfazer zera) */
   const toggleComplete = useCallback((quadrant, cardId) => {
@@ -352,26 +430,51 @@ function App() {
           c.id === cardId ? { ...c, completedAt: willComplete ? Date.now() : null } : c),
       },
     }));
-    flash(willComplete ? "Concluído. Some da lista em 48h." : "Conclusão desfeita");
+    flash(willComplete ? "Concluído. Vai para a lixeira em 48h." : "Conclusão desfeita");
   }, [board, updateBoard, flash]);
 
-  /* varredura das 48h: roda ao abrir e a cada minuto enquanto a página está aberta.
-     Limitação web: só executa quando alguém tem a Matriz aberta no navegador. */
+  /* varredura única (roda ao abrir e a cada minuto enquanto a página está aberta):
+       1) card concluído há 48h  -> vai para a lixeira (registra deletedAt agora);
+       2) card na lixeira há 7 dias -> apagado definitivamente.
+     Limitação web: só executa quando alguém tem a Matriz aberta no navegador.
+     Como o deletedAt fica salvo, o expurgo acontece na próxima abertura após vencer o prazo. */
   useEffect(() => {
     const sweep = () => setState(s => {
       const now = Date.now();
       let changed = false;
+      const moved = []; // concluídos que passam para a lixeira
       const boards = s.boards.map(b => {
         let bChanged = false;
         const cards = {};
         QUAD_IDS.forEach(q => {
-          const kept = b.cards[q].filter(c => !(c.completedAt && now - c.completedAt >= COMPLETE_TTL));
-          if (kept.length !== b.cards[q].length) { bChanged = true; changed = true; }
+          const kept = [];
+          (b.cards[q] || []).forEach(c => {
+            if (c.completedAt && now - c.completedAt >= COMPLETE_TTL) {
+              moved.push({
+                id: uid(),
+                card: { ...c, completedAt: null },
+                boardId: b.id, boardName: b.name, quadrant: q,
+                deletedAt: now, reason: "completed",
+              });
+              bChanged = true; changed = true;
+            } else {
+              kept.push(c);
+            }
+          });
           cards[q] = kept;
         });
         return bChanged ? { ...b, cards } : b;
       });
-      return changed ? { ...s, boards } : s; // mantém referência se nada mudou (sem re-render)
+      /* expurgo: remove da lixeira o que passou dos 7 dias */
+      const curTrash = s.trash || [];
+      const survivors = curTrash.filter(t => now - t.deletedAt < TRASH_TTL);
+      const trashChanged = moved.length > 0 || survivors.length !== curTrash.length;
+      if (!changed && !trashChanged) return s; // nada mudou: mantém referência (sem re-render)
+      return {
+        ...s,
+        boards: changed ? boards : s.boards,
+        trash: [...moved, ...survivors],
+      };
     });
     sweep();
     const iv = setInterval(sweep, 60000);
@@ -467,6 +570,8 @@ function App() {
         onRenameBoard={() => setBoardDialog({ mode: "rename" })}
         onDeleteBoard={() => deleteBoard(board.id)}
         canDelete={state.boards.length > 1}
+        trashCount={(state.trash || []).length}
+        onOpenTrash={() => setTrashOpen(true)}
       />
 
       {reminders.length > 0 && !bannerHidden && (
@@ -524,6 +629,18 @@ function App() {
           onClose={() => setEditor(null)}
           onSave={saveCard}
           onChangeQuadrant={(qid) => setEditor(e => ({ ...e, quadrant: qid }))}
+        />
+      )}
+
+      {trashOpen && (
+        <TrashModal
+          trash={state.trash || []}
+          boards={state.boards}
+          tagById={tagById}
+          onClose={() => setTrashOpen(false)}
+          onRestore={restoreFromTrash}
+          onPurge={purgeFromTrash}
+          onEmpty={emptyTrash}
         />
       )}
 
@@ -613,7 +730,7 @@ function ReminderBanner({ reminders, notifPerm, onEnable, onDismiss }) {
 }
 
 /* ----------------------------------------------------------------- TOPBAR */
-function Topbar({ board, boards, menuOpen, setMenuOpen, onSwitch, onNewBoard, onRenameBoard, onDeleteBoard, canDelete }) {
+function Topbar({ board, boards, menuOpen, setMenuOpen, onSwitch, onNewBoard, onRenameBoard, onDeleteBoard, canDelete, trashCount, onOpenTrash }) {
   return (
     <header className="topbar glass">
       <div className="brand">
@@ -625,6 +742,13 @@ function Topbar({ board, boards, menuOpen, setMenuOpen, onSwitch, onNewBoard, on
       </div>
 
       <div className="topbar__spacer" />
+
+      <button className="trash-btn" title="Lixeira" onClick={onOpenTrash}
+              aria-label={`Abrir lixeira${trashCount ? `, ${trashCount} ${trashCount === 1 ? "item" : "itens"}` : " (vazia)"}`}>
+        <Icon name="trash" />
+        <span className="trash-btn__text">Lixeira</span>
+        {trashCount > 0 && <span className="trash-btn__badge">{trashCount}</span>}
+      </button>
 
       <div className="board-switch">
         <span className="board-switch__label">Quadro</span>
@@ -778,7 +902,7 @@ function Card({ card, quadId, tagById, onEdit, onDelete, onToggleComplete, onMov
       onDragEnd={onDragEnd}
       tabIndex={0}
       onKeyDown={onKeyDown}
-      aria-label={`Card: ${card.title}.${done ? " Concluído." : ""} Enter para editar, C para ${done ? "reabrir" : "concluir"}, Delete para excluir, setas esquerda/direita para mover de quadrante.`}
+      aria-label={`Card: ${card.title}.${done ? " Concluído." : ""} Enter para editar, C para ${done ? "reabrir" : "concluir"}, Delete para enviar à lixeira, setas esquerda/direita para mover de quadrante.`}
     >
       {cover && (
         <div className="card__cover" style={{ backgroundImage: `url(${cover})` }} role="img"
@@ -797,13 +921,13 @@ function Card({ card, quadId, tagById, onEdit, onDelete, onToggleComplete, onMov
             <Icon name={done ? "undo" : "checkCircle"} />
           </button>
           <button className="icon-btn" aria-label="Editar card" onClick={onEdit}><Icon name="edit" /></button>
-          <button className="icon-btn icon-btn--danger" aria-label="Excluir card" onClick={handleDelete}><Icon name="x" /></button>
+          <button className="icon-btn icon-btn--danger" aria-label="Enviar card à lixeira" title="Enviar à lixeira" onClick={handleDelete}><Icon name="x" /></button>
         </div>
       </div>
       {done && (
         <div className="card__done-flag">
           <Icon name="check" /> Concluído
-          <span className="card__done-eta">some em ~{hoursLeft}h</span>
+          <span className="card__done-eta">lixeira em ~{hoursLeft}h</span>
         </div>
       )}
       {cardTags.length > 0 && (
@@ -1204,6 +1328,115 @@ function BoardModal({ mode, current, onClose, onConfirm }) {
           <button type="submit" className="btn btn--primary">{mode === "create" ? "Criar quadro" : "Salvar"}</button>
         </div>
       </form>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------- MODAL DA LIXEIRA */
+function TrashModal({ trash, boards, tagById, onClose, onRestore, onPurge, onEmpty }) {
+  const boardName = (id, fallback) => {
+    const b = boards.find(x => x.id === id);
+    return b ? b.name : (fallback ? `${fallback} (excluído)` : "Quadro removido");
+  };
+  useEffect(() => {
+    const onKey = e => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  /* mais recentes primeiro */
+  const items = [...trash].sort((a, b) => b.deletedAt - a.deletedAt);
+
+  return (
+    <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal modal--trash" role="dialog" aria-modal="true" aria-labelledby="trashModalTitle">
+        <div className="modal__glow" aria-hidden="true" />
+        <div className="modal__head">
+          <div>
+            <span className="kicker">Cesto de reciclagem</span>
+            <h2 id="trashModalTitle">Lixeira</h2>
+          </div>
+          <button type="button" className="icon-btn" aria-label="Fechar" onClick={onClose}><Icon name="x" /></button>
+        </div>
+
+        <p className="trash-note">
+          Cards excluídos e cards concluídos (após 48h) ficam aqui por 7 dias e podem ser restaurados.
+          Depois disso, são apagados definitivamente. A checagem do prazo só roda com a Matriz aberta:
+          o item vence na data salva e some na próxima abertura após o prazo.
+        </p>
+
+        {items.length === 0 ? (
+          <div className="trash-empty">
+            <Icon name="trash" />
+            <span>A lixeira está vazia.</span>
+          </div>
+        ) : (
+          <>
+            <div className="trash-list">
+              {items.map(entry => {
+                const card = entry.card || {};
+                const quad = QUADRANTS.find(q => q.id === entry.quadrant);
+                const cover = card.image && card.image.cover ? card.image.src : null;
+                const cardTags = (card.tags || []).map(id => (tagById || {})[id]).filter(Boolean);
+                const overdue = TRASH_TTL - (Date.now() - entry.deletedAt) <= 0;
+                return (
+                  <div key={entry.id} className="trash-item">
+                    {cover && (
+                      <div className="trash-item__thumb" style={{ backgroundImage: `url(${cover})` }}
+                           role="img" aria-label={`Capa de ${card.title}`} />
+                    )}
+                    <div className="trash-item__body">
+                      <div className="trash-item__top">
+                        <h3 className="trash-item__title">{card.title || "(sem título)"}</h3>
+                        <span className={`trash-tagreason ${entry.reason === "completed" ? "is-done" : "is-del"}`}>
+                          <Icon name={entry.reason === "completed" ? "check" : "x"} />
+                          {entry.reason === "completed" ? "Concluído (48h)" : "Excluído"}
+                        </span>
+                      </div>
+                      {card.description && <p className="trash-item__desc">{card.description}</p>}
+                      {cardTags.length > 0 && (
+                        <div className="trash-item__tags">
+                          {cardTags.map(t => (
+                            <span key={t.id} className="pilltag" style={{ background: t.color, color: textOn(t.color) }}>
+                              {t.title}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <div className="trash-item__meta">
+                        <span className="trash-item__origin">
+                          <Icon name="layers" /> {boardName(entry.boardId, entry.boardName)}
+                          {quad && <> · {quad.title}</>}
+                        </span>
+                        <span className="trash-item__when">excluído {deletedAgo(entry.deletedAt)}</span>
+                        <span className={`trash-item__eta ${overdue ? "is-overdue" : ""}`}>
+                          <Icon name="clock" /> {purgeLeft(entry.deletedAt)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="trash-item__actions">
+                      <button type="button" className="btn btn--ghost" onClick={() => onRestore(entry.id)}>
+                        <Icon name="undo" /> Restaurar
+                      </button>
+                      <button type="button" className="btn btn--danger"
+                              onClick={() => { if (confirm(`Apagar definitivamente "${card.title || "este card"}"? Não dá para desfazer.`)) onPurge(entry.id); }}>
+                        <Icon name="trash" /> Excluir para sempre
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="modal__foot trash-foot">
+              <button type="button" className="btn btn--danger"
+                      onClick={() => { if (confirm("Esvaziar a lixeira? Todos os itens serão apagados definitivamente.")) onEmpty(); }}>
+                <Icon name="trash" /> Esvaziar lixeira
+              </button>
+              <button type="button" className="btn btn--primary" onClick={onClose}>Fechar</button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
