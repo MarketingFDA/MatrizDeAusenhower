@@ -331,7 +331,10 @@ body {
               inset 0 0 30px color-mix(in srgb, var(--c) 14%, transparent);
   transform: translateY(-2px);
 }
-.column.is-over .column__drop-hint { opacity: 1; transform: translateY(0); }
+.column.is-over .column__drop-hint {
+  opacity: 1; transform: translateY(0);
+  max-height: 70px; padding: 16px; margin: 4px 2px 0; border-width: 1px;
+}
 
 .column--do        { --c: var(--do);        --c2: var(--do-2); }
 .column--schedule  { --c: var(--schedule);  --c2: var(--schedule-2); }
@@ -409,14 +412,18 @@ body {
 .column__list::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--c) 45%, transparent); border-radius: 6px; }
 
 .column__drop-hint {
-  margin: 4px 2px; padding: 16px;
+  /* Colapsado por padrão para não criar vão entre o botão e o primeiro card.
+     Só ganha altura/espaço quando um card é arrastado sobre a coluna (.is-over). */
+  margin: 0 2px; padding: 0 16px;
+  max-height: 0; overflow: hidden;
   text-align: center;
   border-radius: var(--radius-sm);
-  border: 1px dashed color-mix(in srgb, var(--c) 55%, transparent);
+  border: 0 dashed color-mix(in srgb, var(--c) 55%, transparent);
   color: color-mix(in srgb, var(--c) 90%, white);
   font-family: var(--font-mono); font-size: 11px; letter-spacing: 1px;
   opacity: 0; transform: translateY(-4px);
-  transition: opacity .2s var(--ease), transform .2s var(--ease);
+  transition: opacity .2s var(--ease), transform .2s var(--ease),
+              max-height .2s var(--ease), padding .2s var(--ease), margin .2s var(--ease);
 }
 
 .column__empty {
