@@ -34,6 +34,11 @@ function Icon({ name, ...p }) {
     clock:    <g><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></g>,
     layers:   <g><path d="m12 3 9 5-9 5-9-5 9-5Z" /><path d="m3 13 9 5 9-5" /></g>,
     target:   <g><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/></g>,
+    link:     <g><path d="M9 15l6-6"/><path d="M11 6.5 12 5.5a4 4 0 0 1 6 6l-1 1"/><path d="M13 17.5 12 18.5a4 4 0 0 1-6-6l1-1"/></g>,
+    image:    <g><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="m4 18 5-5 4 4 3-3 4 4"/></g>,
+    upload:   <g><path d="M12 16V4M8 8l4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></g>,
+    bell:     <g><path d="M18 8.5a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></g>,
+    external: <g><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></g>,
   };
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
@@ -105,6 +110,102 @@ function formatDue(due) {
   return { label, rel, soon: diff <= 1 };
 }
 
+/* ------------------------------------------------- datas / lembretes / mídia */
+const NOTIFY_KEY = "emp.eisenhower.notified.v1";
+
+/* Data local (não UTC) no formato yyyy-mm-dd, com deslocamento em dias. */
+function dateStr(offset = 0) {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + offset);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/* Coleta cards com vencimento hoje (no_dia) ou amanhã (vespera) em todos os quadros. */
+function collectReminders(boards) {
+  const today = dateStr(0), tomorrow = dateStr(1);
+  const out = [];
+  boards.forEach(b => QUAD_IDS.forEach(q => (b.cards[q] || []).forEach(c => {
+    if (!c.due) return;
+    if (c.due === today) out.push({ id: c.id, title: c.title, quad: q, board: b.name, type: "no_dia" });
+    else if (c.due === tomorrow) out.push({ id: c.id, title: c.title, quad: q, board: b.name, type: "vespera" });
+  })));
+  return out;
+}
+
+function loadNotified() {
+  try { return JSON.parse(localStorage.getItem(NOTIFY_KEY)) || {}; }
+  catch (e) { return {}; }
+}
+function saveNotified(map, today) {
+  /* mantém só os registros do dia atual para não crescer sem limite */
+  const clean = {};
+  Object.keys(map).forEach(k => { if (k.endsWith(":" + today)) clean[k] = true; });
+  try { localStorage.setItem(NOTIFY_KEY, JSON.stringify(clean)); } catch (e) {}
+}
+
+/* Dispara as notificações do navegador pendentes, sem repetir no mesmo dia. */
+function fireDueNotifications(boards) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  const today = dateStr(0);
+  const notified = loadNotified();
+  collectReminders(boards).forEach(ev => {
+    const key = `${ev.id}:${ev.type}:${today}`;
+    if (notified[key]) return;
+    const quadTitle = (QUADRANTS.find(q => q.id === ev.quad) || {}).title || "";
+    const title = ev.type === "no_dia"
+      ? `Hoje é a data-limite: ${ev.title}`
+      : `Falta 1 dia para a data-limite: ${ev.title}`;
+    const body = `Quadrante ${quadTitle} · Quadro ${ev.board}`;
+    try { new Notification(title, { body, tag: key }); } catch (e) {}
+    notified[key] = true;
+  });
+  saveNotified(notified, today);
+}
+
+/* Lê arquivo de imagem, reduz para no máx. maxDim px e comprime em JPEG.
+   Isso evita estourar a cota do localStorage com base64 gigante. */
+function fileToDataURL(file, maxDim = 1400, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          const s = Math.min(maxDim / width, maxDim / height);
+          width = Math.round(width * s);
+          height = Math.round(height * s);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#0d0d16";
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function normalizeUrl(u) {
+  const s = (u || "").trim();
+  if (!s) return "";
+  if (/^https?:\/\//i.test(s)) return s;
+  return "https://" + s;
+}
+function hostOf(u) {
+  try { return new URL(u).hostname.replace(/^www\./, ""); } catch (e) { return u; }
+}
+
 /* ----------------------------------------------------- contador animado HUD */
 function useCountUp(value) {
   const [display, setDisplay] = useState(value);
@@ -134,13 +235,34 @@ function App() {
   const [boardDialog, setBoardDialog] = useState(null); // {mode:'create'|'rename'}
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState(null);
+  const [notifPerm, setNotifPerm] = useState(
+    () => ("Notification" in window ? Notification.permission : "unsupported")
+  );
+  const [bannerHidden, setBannerHidden] = useState(false);
   const dragRef = useRef(null); // {cardId, from}
 
   /* persistência */
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-    catch (e) { console.warn("Não foi possível salvar no localStorage", e); }
+    catch (e) {
+      console.warn("Não foi possível salvar no localStorage", e);
+      if (e && (e.name === "QuotaExceededError" || /quota/i.test(String(e))))
+        setToast({ id: uid(), msg: "Armazenamento cheio: use imagens menores ou por URL." });
+    }
   }, [state]);
+
+  /* --------- lembretes de data-limite (Web Notifications + fallback visual) */
+  const reminders = useMemo(() => collectReminders(state.boards), [state]);
+  const stateRef = useRef(state);
+  useEffect(() => { stateRef.current = state; }, [state]);
+
+  useEffect(() => {
+    if (!("Notification" in window)) return;
+    const run = () => fireDueNotifications(stateRef.current.boards);
+    run(); // checa ao abrir e sempre que a permissão mudar
+    const iv = setInterval(run, 60000); // re-checa a cada minuto (pega a virada do dia)
+    return () => clearInterval(iv);
+  }, [notifPerm]);
 
   const board = state.boards.find(b => b.id === state.activeBoardId) || state.boards[0];
 
@@ -148,6 +270,14 @@ function App() {
     setToast({ id: uid(), msg });
     setTimeout(() => setToast(t => (t && t.msg === msg ? null : t)), 2600);
   }, []);
+
+  const enableNotifications = useCallback(() => {
+    if (!("Notification" in window)) return;
+    Notification.requestPermission().then(p => {
+      setNotifPerm(p);
+      if (p === "granted") { fireDueNotifications(stateRef.current.boards); flash("Avisos ativados"); }
+    });
+  }, [flash]);
 
   /* ---- mutações de cards ---- */
   const updateBoard = useCallback((boardId, fn) => {
@@ -250,6 +380,15 @@ function App() {
         canDelete={state.boards.length > 1}
       />
 
+      {reminders.length > 0 && !bannerHidden && (
+        <ReminderBanner
+          reminders={reminders}
+          notifPerm={notifPerm}
+          onEnable={enableNotifications}
+          onDismiss={() => setBannerHidden(true)}
+        />
+      )}
+
       <main className="board" aria-label={`Quadro ${board.name}`}>
         {QUADRANTS.map(q => (
           <Column
@@ -299,6 +438,43 @@ function App() {
         {toast && <div className="toast" key={toast.id}><span className="dot" />{toast.msg}</div>}
       </div>
     </div>
+  );
+}
+
+/* -------------------------------------------------------- BANNER LEMBRETES */
+function ReminderBanner({ reminders, notifPerm, onEnable, onDismiss }) {
+  const today = reminders.filter(r => r.type === "no_dia");
+  const soon = reminders.filter(r => r.type === "vespera");
+  return (
+    <section className="reminder glass" aria-label="Lembretes de data-limite">
+      <div className="reminder__icon"><Icon name="bell" /></div>
+      <div className="reminder__body">
+        <span className="reminder__kicker">Lembretes de data-limite</span>
+        <div className="reminder__list">
+          {today.map(r => (
+            <span key={r.id + "d"} className="reminder__chip reminder__chip--today">
+              Hoje: {r.title} <em>· {(QUADRANTS.find(q => q.id === r.quad) || {}).title} · {r.board}</em>
+            </span>
+          ))}
+          {soon.map(r => (
+            <span key={r.id + "s"} className="reminder__chip">
+              Falta 1 dia: {r.title} <em>· {(QUADRANTS.find(q => q.id === r.quad) || {}).title} · {r.board}</em>
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="reminder__actions">
+        {notifPerm === "default" && (
+          <button className="btn btn--primary" onClick={onEnable}>
+            <Icon name="bell" /> Ativar avisos
+          </button>
+        )}
+        {notifPerm === "denied" && (
+          <span className="reminder__note">Avisos bloqueados no navegador; veja a lista acima.</span>
+        )}
+        <button className="icon-btn" aria-label="Dispensar lembretes" onClick={onDismiss}><Icon name="x" /></button>
+      </div>
+    </section>
   );
 }
 
@@ -423,6 +599,9 @@ function Card({ card, quadId, onEdit, onDelete, onMoveKeyboard, dragRef }) {
   const [dragging, setDragging] = useState(false);
   const [removing, setRemoving] = useState(false);
   const due = formatDue(card.due);
+  const links = Array.isArray(card.links) ? card.links : [];
+  const cover = card.image && card.image.cover ? card.image.src : null;
+  const hasInnerImage = card.image && !card.image.cover;
 
   const handleDelete = () => { setRemoving(true); setTimeout(onDelete, 260); };
 
@@ -443,7 +622,7 @@ function Card({ card, quadId, onEdit, onDelete, onMoveKeyboard, dragRef }) {
 
   return (
     <article
-      className={`card ${dragging ? "dragging" : ""} ${removing ? "removing" : ""}`}
+      className={`card ${dragging ? "dragging" : ""} ${removing ? "removing" : ""} ${cover ? "card--has-cover" : ""}`}
       draggable={!removing}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
@@ -451,6 +630,12 @@ function Card({ card, quadId, onEdit, onDelete, onMoveKeyboard, dragRef }) {
       onKeyDown={onKeyDown}
       aria-label={`Card: ${card.title}. Enter para editar, Delete para excluir, setas esquerda/direita para mover de quadrante.`}
     >
+      {cover && (
+        <div className="card__cover" style={{ backgroundImage: `url(${cover})` }} role="img"
+             aria-label={`Imagem de capa de ${card.title}`}>
+          <span className="card__cover-veil" aria-hidden="true" />
+        </div>
+      )}
       <div className="card__top">
         <span className="card__grip" aria-hidden="true"><Icon name="grip" /></span>
         <h3 className="card__title">{card.title}</h3>
@@ -460,10 +645,22 @@ function Card({ card, quadId, onEdit, onDelete, onMoveKeyboard, dragRef }) {
         </div>
       </div>
       {card.description && <p className="card__desc">{card.description}</p>}
+      {links.length > 0 && (
+        <div className="card__links">
+          {links.map(l => (
+            <a key={l.id} className="card__link" href={l.url} target="_blank" rel="noopener noreferrer"
+               draggable={false} onMouseDown={e => e.stopPropagation()}
+               title={l.url}>
+              <Icon name="link" /> <span>{l.label || hostOf(l.url)}</span>
+            </a>
+          ))}
+        </div>
+      )}
       <div className="card__meta">
         {due
           ? <span className={`tag ${due.soon ? "tag--due-soon" : ""}`}><Icon name="calendar" /> {due.label} · {due.rel}</span>
           : <span className="tag" style={{ opacity: .7 }}><Icon name="clock" /> sem prazo</span>}
+        {hasInnerImage && <span className="tag" title="Contém imagem"><Icon name="image" /> imagem</span>}
       </div>
     </article>
   );
@@ -476,8 +673,43 @@ function CardModal({ editor, onClose, onSave, onChangeQuadrant }) {
   const [title, setTitle] = useState(c.title || "");
   const [description, setDescription] = useState(c.description || "");
   const [due, setDue] = useState(c.due || "");
+  const [links, setLinks] = useState(Array.isArray(c.links) ? c.links : []);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkLabel, setLinkLabel] = useState("");
+  const [image, setImage] = useState(c.image || null); // {src, cover}
+  const [imgUrl, setImgUrl] = useState("");
+  const [imgBusy, setImgBusy] = useState(false);
   const [error, setError] = useState("");
   const firstRef = useRef(null);
+  const fileRef = useRef(null);
+
+  const addLink = () => {
+    const url = normalizeUrl(linkUrl);
+    if (!url) return;
+    setLinks(ls => [...ls, { id: uid(), url, label: linkLabel.trim() }]);
+    setLinkUrl(""); setLinkLabel("");
+  };
+  const removeLink = (id) => setLinks(ls => ls.filter(l => l.id !== id));
+
+  const onPickFile = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setImgBusy(true);
+    try {
+      const src = await fileToDataURL(file);
+      setImage(img => ({ src, cover: img ? img.cover : false }));
+    } catch (_) { setError("Não foi possível carregar a imagem."); }
+    setImgBusy(false);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+  const addImageUrl = () => {
+    const src = normalizeUrl(imgUrl);
+    if (!src) return;
+    setImage(img => ({ src, cover: img ? img.cover : false }));
+    setImgUrl("");
+  };
+  const removeImage = () => setImage(null);
+  const toggleCover = () => setImage(img => (img ? { ...img, cover: !img.cover } : img));
 
   useEffect(() => { firstRef.current && firstRef.current.focus(); }, []);
   useEffect(() => {
@@ -489,7 +721,7 @@ function CardModal({ editor, onClose, onSave, onChangeQuadrant }) {
   const submit = (e) => {
     e.preventDefault();
     if (!title.trim()) { setError("Dê um título à missão."); return; }
-    onSave({ title: title.trim(), description: description.trim(), due });
+    onSave({ title: title.trim(), description: description.trim(), due, links, image });
   };
 
   return (
@@ -522,6 +754,69 @@ function CardModal({ editor, onClose, onSave, onChangeQuadrant }) {
         <div className="field">
           <label htmlFor="f-due">Data de vencimento</label>
           <input id="f-due" type="date" className="date" value={due} onChange={e => setDue(e.target.value)} />
+        </div>
+
+        <div className="field">
+          <label>Links</label>
+          {links.length > 0 && (
+            <ul className="linklist">
+              {links.map(l => (
+                <li key={l.id} className="linklist__item">
+                  <Icon name="link" />
+                  <a href={l.url} target="_blank" rel="noopener noreferrer" className="linklist__url">
+                    {l.label ? `${l.label} (${hostOf(l.url)})` : l.url}
+                  </a>
+                  <button type="button" className="icon-btn icon-btn--danger" aria-label="Remover link"
+                          onClick={() => removeLink(l.id)}><Icon name="x" /></button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="inline-add">
+            <input className="input" value={linkUrl} placeholder="https://exemplo.com"
+                   onChange={e => setLinkUrl(e.target.value)}
+                   onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addLink(); } }} />
+            <input className="input" value={linkLabel} placeholder="Rótulo (opcional)" maxLength={40}
+                   onChange={e => setLinkLabel(e.target.value)}
+                   onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addLink(); } }} />
+            <button type="button" className="btn btn--ghost" onClick={addLink}><Icon name="plus" /> Adicionar</button>
+          </div>
+        </div>
+
+        <div className="field">
+          <label>Imagem</label>
+          {image ? (
+            <div className="imgbox">
+              <div className="imgbox__preview" style={{ backgroundImage: `url(${image.src})` }} role="img"
+                   aria-label="Pré-visualização da imagem do card" />
+              <div className="imgbox__ctrl">
+                <label className="checkline">
+                  <input type="checkbox" checked={!!image.cover} onChange={toggleCover} />
+                  <span>Usar como imagem de capa (aparece no card sem abrir)</span>
+                </label>
+                <span className="imgbox__hint">
+                  {image.cover ? "Capa: fica no topo do card." : "Conteúdo interno: aparece só aqui na edição."}
+                </span>
+                <button type="button" className="btn btn--danger" onClick={removeImage}>
+                  <Icon name="trash" /> Remover imagem
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="imgadd">
+              <button type="button" className="btn btn--ghost" disabled={imgBusy}
+                      onClick={() => fileRef.current && fileRef.current.click()}>
+                <Icon name="upload" /> {imgBusy ? "Carregando..." : "Enviar arquivo"}
+              </button>
+              <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPickFile} />
+              <div className="inline-add">
+                <input className="input" value={imgUrl} placeholder="ou cole a URL de uma imagem"
+                       onChange={e => setImgUrl(e.target.value)}
+                       onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addImageUrl(); } }} />
+                <button type="button" className="btn btn--ghost" onClick={addImageUrl}><Icon name="plus" /> Usar URL</button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="field">

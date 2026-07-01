@@ -13,6 +13,9 @@ Single Page Application (SPA) responsiva que une um quadro **Kanban** à **Matri
   - ⚪ **Eliminar** — Não urgente · Não importante
 - **Múltiplos perfis/quadros** (workspaces): crie "Trabalho", "Pessoal", "Projeto X"… cada um com seu próprio estado, salvo de forma independente.
 - **Cards arrastáveis** (drag & drop) entre quadrantes, com título, descrição e data de vencimento.
+- **Links nos cards**: adicione um ou mais links (URL com rótulo opcional), abertos em nova aba com `rel="noopener"`.
+- **Imagens nos cards**: envie um arquivo (convertido e comprimido em base64) ou cole a URL de uma imagem. Escolha usar como **capa** (aparece no topo do card, sem abrir) ou como **conteúdo interno** (visível só na edição).
+- **Lembretes da data-limite**: avisos no computador (Web Notifications) 1 dia antes e no dia do vencimento, sem repetir no mesmo dia, com fallback visual em banner no topo quando a notificação não estiver disponível.
 - **Criar / renomear / excluir** quadros e cards via modais com vidro líquido.
 - **HUD futurista**: contadores animados por quadrante.
 - **Persistência em `localStorage`** — os dados ficam salvos após recarregar a página.

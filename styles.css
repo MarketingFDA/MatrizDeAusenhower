@@ -589,6 +589,99 @@ body {
 .toast .dot { width: 7px; height: 7px; border-radius: 50%; background: #00f0ff; box-shadow: 0 0 8px #00f0ff; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 
+/* ----------------------------------------------- BANNER DE LEMBRETES */
+.reminder {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 16px;
+  border-color: rgba(255,122,24,0.35);
+  box-shadow: 0 0 30px -8px rgba(255,122,24,0.35), inset 0 0 0 1px rgba(255,255,255,0.02);
+}
+.reminder__icon {
+  width: 38px; height: 38px; flex: 0 0 auto;
+  display: grid; place-items: center; border-radius: 11px;
+  color: #ffc27a;
+  background: rgba(255,122,24,0.14);
+  border: 1px solid rgba(255,122,24,0.4);
+  box-shadow: 0 0 16px rgba(255,122,24,0.35);
+  animation: bellRing 3.2s var(--ease) infinite;
+}
+.reminder__icon svg { width: 19px; height: 19px; }
+@keyframes bellRing { 0%,88%,100% { transform: rotate(0); } 90% { transform: rotate(11deg); } 94% { transform: rotate(-9deg); } 97% { transform: rotate(5deg); } }
+.reminder__body { flex: 1; min-width: 0; }
+.reminder__kicker {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 2px;
+  text-transform: uppercase; color: var(--text-faint); display: block; margin-bottom: 6px;
+}
+.reminder__list { display: flex; flex-wrap: wrap; gap: 7px; }
+.reminder__chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 8px; font-size: 12px; color: var(--text);
+  background: rgba(0,240,255,0.10); border: 1px solid rgba(0,240,255,0.28);
+}
+.reminder__chip em { font-style: normal; color: var(--text-faint); font-size: 10.5px; font-family: var(--font-mono); }
+.reminder__chip--today { background: rgba(255,59,59,0.14); border-color: rgba(255,59,59,0.42); }
+.reminder__actions { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.reminder__note { font-size: 11px; color: var(--text-faint); font-family: var(--font-mono); max-width: 180px; }
+
+/* ------------------------------------------------- CAPA E LINKS NO CARD */
+.card__cover {
+  position: relative;
+  margin: -13px -13px 11px;
+  height: 116px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background-size: cover; background-position: center;
+  border-bottom: 1px solid color-mix(in srgb, var(--c) 34%, transparent);
+}
+.card__cover-veil {
+  position: absolute; inset: 0; border-radius: inherit;
+  background: linear-gradient(180deg, rgba(6,7,14,0.10) 0%, rgba(6,7,14,0.05) 45%, rgba(10,10,15,0.72) 100%);
+}
+.card--has-cover { padding-top: 0; }
+
+.card__links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.card__link {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+  padding: 3px 9px; border-radius: 7px;
+  font-family: var(--font-mono); font-size: 10.5px; text-decoration: none;
+  color: #9fe9ff;
+  background: rgba(0,240,255,0.10); border: 1px solid rgba(0,240,255,0.28);
+  transition: background .18s var(--ease), box-shadow .18s var(--ease);
+}
+.card__link:hover { background: rgba(0,240,255,0.2); box-shadow: 0 0 12px rgba(0,240,255,0.3); }
+.card__link svg { width: 11px; height: 11px; flex: 0 0 auto; }
+.card__link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* --------------------------------- MODAL: LINKS E IMAGEM (edição do card) */
+.inline-add { display: flex; gap: 8px; flex-wrap: wrap; }
+.inline-add .input { flex: 1 1 160px; min-width: 0; }
+.inline-add .btn { flex: 0 0 auto; }
+
+.linklist { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.linklist__item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border-radius: 10px;
+  background: rgba(0,0,0,0.25); border: 1px solid var(--stroke);
+}
+.linklist__item > svg { width: 14px; height: 14px; color: #9fe9ff; flex: 0 0 auto; }
+.linklist__url {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #9fe9ff; font-size: 12.5px; text-decoration: none;
+}
+.linklist__url:hover { text-decoration: underline; }
+
+.imgadd { display: flex; flex-direction: column; gap: 10px; }
+.imgbox { display: flex; gap: 14px; flex-wrap: wrap; }
+.imgbox__preview {
+  width: 150px; height: 100px; flex: 0 0 auto;
+  border-radius: 12px; background-size: cover; background-position: center;
+  border: 1px solid var(--stroke);
+}
+.imgbox__ctrl { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 9px; align-items: flex-start; }
+.checkline { display: flex; align-items: flex-start; gap: 9px; cursor: pointer; text-transform: none; letter-spacing: normal; }
+.checkline input { width: 17px; height: 17px; accent-color: var(--schedule); margin-top: 1px; flex: 0 0 auto; }
+.checkline span { font-family: var(--font-body); font-size: 12.5px; color: var(--text); line-height: 1.35; }
+.imgbox__hint { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); }
+
 /* --------------------------------------------------------- RESPONSIVO */
 @media (max-width: 1080px) {
   .board { grid-template-columns: repeat(2, minmax(0,1fr)); }
@@ -604,6 +697,9 @@ body {
   .select { flex: 1 1 100%; order: -1; }
   .select__btn { width: 100%; justify-content: space-between; }
   .board-switch > .btn--primary { flex: 1 1 auto; justify-content: center; }
+  .reminder { flex-wrap: wrap; }
+  .reminder__actions { width: 100%; justify-content: flex-end; }
+  .imgbox__preview { width: 100%; height: 130px; }
 }
 
 /* ----------------------------------------------- REDUÇÃO DE MOVIMENTO */
