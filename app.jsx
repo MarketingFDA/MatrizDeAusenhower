@@ -1085,6 +1085,7 @@ function CardModal({ editor, tags, onCreateTag, onUpdateTag, onDeleteTag, onClos
           <button type="button" className="icon-btn" aria-label="Fechar" onClick={onClose}><Icon name="x" /></button>
         </div>
 
+        <div className="modal__body">
         <div className="field">
           <label htmlFor="f-title">Título</label>
           <input id="f-title" ref={firstRef} className="input" value={title}
@@ -1275,6 +1276,7 @@ function CardModal({ editor, tags, onCreateTag, onUpdateTag, onDeleteTag, onClos
               </button>
             ))}
           </div>
+        </div>
         </div>
 
         <div className="modal__foot">
