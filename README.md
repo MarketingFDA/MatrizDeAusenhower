@@ -12,7 +12,11 @@ Single Page Application (SPA) responsiva que une um quadro **Kanban** à **Matri
   - 🟣 **Delegar** — Urgente · Não importante
   - ⚪ **Eliminar** — Não urgente · Não importante
 - **Múltiplos perfis/quadros** (workspaces): crie "Trabalho", "Pessoal", "Projeto X"… cada um com seu próprio estado, salvo de forma independente.
-- **Cards arrastáveis** (drag & drop) entre quadrantes, com título, descrição e data de vencimento.
+- **Cards arrastáveis** (drag & drop) entre quadrantes e **reordenáveis dentro do próprio quadrante**, com um espaço fantasma animado indicando onde o card vai cair. A ordem de cada quadrante é salva.
+- **Composer inline (estilo Trello)**: o botão "Novo card" abre uma caixa de texto direto na coluna. `Enter` cria o cartão e mantém a caixa aberta e focada para adicionar vários em sequência, `Shift+Enter` quebra linha e `Esc` fecha. O botão "Detalhes" leva ao editor completo com o título já preenchido.
+- **Barra de badges na frente do card**: linha compacta que aparece só quando há o dado, com prazo colorido por status (vencido em vermelho, hoje/amanhã em âmbar, futuro neutro e concluído em verde), contador de checklist, ícone de descrição, número de links e indicador de imagem.
+- **Etiquetas em barrinhas coloridas (estilo Trello)**: na frente do card as tags viram barras de cor compactas. Um clique na etiqueta (ou o botão "Etiquetas" na barra de filtro) alterna entre barras e nomes, e a preferência fica salva. No editor e no filtro as tags continuam com o nome.
+- **Fundo do quadro personalizável**: botão "Fundo" no cabeçalho abre um seletor com cores/gradientes prontos (coerentes com o Liquid Glass) e imagem por URL. A escolha é salva por quadro. Um véu de vidro por cima mantém os cards e os textos sempre legíveis sobre qualquer fundo.
 - **Checklist (subtarefas) nos cards**: adicione vários itens, marque/desmarque cada um (concluídos ficam riscados e esmaecidos), remova e reordene. O card mostra um indicador discreto de progresso ("3/5" com barrinha).
 - **Concluir com envio automático à lixeira em 48h**: marque um card como concluído (fica esmaecido, com título riscado e selo "Concluído"). Passadas 48 horas, ele vai automaticamente para a lixeira (não some de vez). Dá para reabrir (desfazer) antes desse prazo. A checagem das 48h roda ao abrir a Matriz e a cada minuto enquanto ela está aberta.
 - **Lixeira (cesto de reciclagem)**: excluir um card não apaga de vez, manda para a lixeira, que guarda de onde ele veio (quadro e quadrante) e quando foi excluído. No painel da Lixeira dá para **restaurar** cada card no lugar de origem ou **excluir para sempre** na hora, além de **esvaziar a lixeira** inteira. Cada item mostra quanto falta para o expurgo. Fluxo dos prazos: concluído → 48h → lixeira → 7 dias → apagado definitivamente; excluído manualmente → lixeira → 7 dias → apagado definitivamente. O expurgo dos 7 dias reaproveita a mesma varredura dos lembretes/48h.
@@ -30,6 +34,7 @@ Single Page Application (SPA) responsiva que une um quadro **Kanban** à **Matri
 
 - `Enter` — editar &nbsp;·&nbsp; `Delete` / `Backspace` — enviar à lixeira &nbsp;·&nbsp; `C` — concluir/reabrir
 - `←` / `→` — mover o card para o quadrante anterior/seguinte
+- `↑` / `↓` — reordenar o card dentro do quadrante
 
 ## Tecnologias
 

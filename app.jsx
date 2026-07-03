@@ -7,6 +7,20 @@ const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
 /* ------------------------------------------------------------ constantes */
 const STORAGE_KEY = "emp.eisenhower.v1";
+const LABELS_KEY = "emp.eisenhower.labels.v1"; // preferência global: etiquetas compactas/expandidas
+
+/* Fundos de quadro (estilo Trello), coerentes com o Liquid Glass.
+   type: "color" (aplicado direto) ou "image" (URL de fundo). */
+const BOARD_BGS = [
+  { id: "default",  type: "color", label: "Padrão",   css: "" },
+  { id: "aurora",   type: "color", label: "Aurora",   css: "linear-gradient(135deg, #0f2027, #203a43 45%, #2c5364)" },
+  { id: "nebula",   type: "color", label: "Nebulosa", css: "linear-gradient(135deg, #1a0033, #3a0ca3 50%, #7209b7)" },
+  { id: "sunset",   type: "color", label: "Poente",   css: "linear-gradient(135deg, #3a1c71, #d76d77 55%, #ffaf7b)" },
+  { id: "ocean",    type: "color", label: "Oceano",   css: "linear-gradient(135deg, #000428, #004e92)" },
+  { id: "emerald",  type: "color", label: "Esmeralda",css: "linear-gradient(135deg, #0f3443, #34e89e)" },
+  { id: "magma",    type: "color", label: "Magma",    css: "linear-gradient(135deg, #200122, #6f0000)" },
+  { id: "graphite", type: "color", label: "Grafite",  css: "linear-gradient(135deg, #0d1117, #262b36 60%, #11151c)" },
+];
 
 const QUADRANTS = [
   { id: "do",        title: "Fazer Agora", sub: "Urgente · Importante",        icon: "bolt"     },
@@ -64,6 +78,8 @@ function Icon({ name, ...p }) {
     checkCircle:<g><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/></g>,
     undo:     <g><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10H9"/></g>,
     tag:      <g><path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9-9-9Z"/><circle cx="7.5" cy="7.5" r="1.3"/></g>,
+    text:     <g><path d="M4 6h16M4 12h12M4 18h16"/></g>,
+    tags:     <g><path d="M4 8h16M4 13h16M4 18h16"/></g>,
   };
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
@@ -138,7 +154,11 @@ function formatDue(due) {
   else if (diff === -1) rel = "ontem";
   else if (diff < 0) rel = `${Math.abs(diff)}d atrás`;
   else rel = `em ${diff}d`;
-  return { label, rel, soon: diff <= 1 };
+  let status = "future";
+  if (diff < 0) status = "overdue";
+  else if (diff === 0) status = "today";
+  else if (diff === 1) status = "soon";
+  return { label, rel, soon: diff <= 1, diff, status };
 }
 
 /* Tempo que falta para o expurgo definitivo de um item na lixeira. */
@@ -296,7 +316,16 @@ function App() {
   const [bannerHidden, setBannerHidden] = useState(false);
   const [tagFilter, setTagFilter] = useState([]); // ids de tags para filtrar o quadro
   const [trashOpen, setTrashOpen] = useState(false); // painel da lixeira
+  const [bgOpen, setBgOpen] = useState(false); // seletor de fundo do quadro
+  const [labelsExpanded, setLabelsExpanded] = useState(() => {
+    try { return localStorage.getItem(LABELS_KEY) === "1"; } catch (e) { return false; }
+  });
   const dragRef = useRef(null); // {cardId, from}
+
+  /* preferência global compacto/expandido das etiquetas (persistida à parte) */
+  useEffect(() => {
+    try { localStorage.setItem(LABELS_KEY, labelsExpanded ? "1" : "0"); } catch (e) {}
+  }, [labelsExpanded]);
 
   /* persistência */
   useEffect(() => {
@@ -503,19 +532,53 @@ function App() {
   }, []);
 
   const moveCard = useCallback((cardId, from, to, index = null) => {
-    if (from === to && index === null) return;
+    if (from === to && index === null) return; // soltar sem posição no mesmo quadrante: no-op
     updateBoard(board.id, b => {
       const src = [...b.cards[from]];
       const idx = src.findIndex(c => c.id === cardId);
       if (idx === -1) return b;
       const [moved] = src.splice(idx, 1);
-      const cards = { ...b.cards, [from]: src };
-      const dst = from === to ? src : [...b.cards[to]];
-      const at = index === null ? dst.length : index;
+      if (from === to) {
+        // reordenar dentro do mesmo quadrante: compensa o deslocamento da remoção
+        let at = index === null ? src.length : index;
+        if (idx < at) at -= 1;
+        at = Math.max(0, Math.min(at, src.length));
+        const arr = [...src];
+        arr.splice(at, 0, moved);
+        return { ...b, cards: { ...b.cards, [to]: arr } };
+      }
+      const dst = [...b.cards[to]];
+      const at = index === null ? dst.length : Math.max(0, Math.min(index, dst.length));
       dst.splice(at, 0, moved);
-      cards[to] = dst;
-      return { ...b, cards };
+      return { ...b, cards: { ...b.cards, [from]: src, [to]: dst } };
     });
+  }, [board, updateBoard]);
+
+  /* reordenar por teclado (setas ↑/↓) dentro do mesmo quadrante */
+  const reorderCard = useCallback((quad, cardId, dir) => {
+    updateBoard(board.id, b => {
+      const arr = [...b.cards[quad]];
+      const i = arr.findIndex(c => c.id === cardId);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= arr.length) return b;
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+      return { ...b, cards: { ...b.cards, [quad]: arr } };
+    });
+  }, [board, updateBoard]);
+
+  /* criação rápida (composer inline estilo Trello): cria só com título, no topo do quadrante */
+  const quickAddCard = useCallback((quadrant, title) => {
+    const t = (title || "").trim();
+    if (!t) return;
+    updateBoard(board.id, b => ({
+      ...b,
+      cards: { ...b.cards, [quadrant]: [{ id: uid(), createdAt: Date.now(), title: t }, ...b.cards[quadrant]] },
+    }));
+  }, [board, updateBoard]);
+
+  /* fundo personalizado do quadro atual (persistido por board) */
+  const setBoardBackground = useCallback((bg) => {
+    updateBoard(board.id, b => ({ ...b, background: bg }));
   }, [board, updateBoard]);
 
   /* ---- mutações de quadros (perfis) ---- */
@@ -558,8 +621,18 @@ function App() {
     return () => { document.removeEventListener("keydown", onKey); document.removeEventListener("mousedown", onClick); };
   }, [menuOpen]);
 
+  const boardBg = board.background || null;
+
   return (
     <div className="app">
+      {boardBg && (
+        <div className="board-bg" aria-hidden="true"
+             style={boardBg.type === "image"
+               ? { backgroundImage: `url(${boardBg.url})` }
+               : { backgroundImage: boardBg.css }}>
+          <div className="board-bg__veil" />
+        </div>
+      )}
       <Topbar
         board={board}
         boards={state.boards}
@@ -572,6 +645,7 @@ function App() {
         canDelete={state.boards.length > 1}
         trashCount={(state.trash || []).length}
         onOpenTrash={() => setTrashOpen(true)}
+        onOpenBg={() => setBgOpen(true)}
       />
 
       {reminders.length > 0 && !bannerHidden && (
@@ -589,6 +663,8 @@ function App() {
           active={activeFilter}
           onToggle={(id) => setTagFilter(f => f.includes(id) ? f.filter(x => x !== id) : [...f, id])}
           onClear={() => setTagFilter([])}
+          labelsExpanded={labelsExpanded}
+          onToggleLabels={() => setLabelsExpanded(v => !v)}
         />
       )}
 
@@ -600,7 +676,10 @@ function App() {
             cards={board.cards[q.id]}
             tagById={tagById}
             filter={activeFilter}
-            onAdd={() => setEditor({ mode: "create", quadrant: q.id })}
+            labelsExpanded={labelsExpanded}
+            onToggleLabels={() => setLabelsExpanded(v => !v)}
+            onOpenEditor={(title) => setEditor({ mode: "create", quadrant: q.id, title })}
+            onQuickAdd={(title) => quickAddCard(q.id, title)}
             onEdit={(card) => setEditor({ mode: "edit", quadrant: q.id, card })}
             onDelete={(cardId) => deleteCard(q.id, cardId)}
             onToggleComplete={(cardId) => toggleComplete(q.id, cardId)}
@@ -609,6 +688,7 @@ function App() {
               const target = QUAD_IDS[i + dir];
               if (target) { moveCard(cardId, q.id, target); flash(`Movido para ${QUADRANTS[i + dir].title}`); }
             }}
+            onReorderKeyboard={(cardId, dir) => reorderCard(q.id, cardId, dir)}
             dragRef={dragRef}
             onDropCard={(to, index) => {
               const d = dragRef.current;
@@ -629,6 +709,15 @@ function App() {
           onClose={() => setEditor(null)}
           onSave={saveCard}
           onChangeQuadrant={(qid) => setEditor(e => ({ ...e, quadrant: qid }))}
+        />
+      )}
+
+      {bgOpen && (
+        <BackgroundModal
+          current={boardBg}
+          boardName={board.name}
+          onClose={() => setBgOpen(false)}
+          onApply={(bg) => { setBoardBackground(bg); flash(bg ? "Fundo do quadro atualizado" : "Fundo padrão restaurado"); }}
         />
       )}
 
@@ -664,7 +753,7 @@ function App() {
 }
 
 /* ------------------------------------------------------ BARRA DE FILTRO TAG */
-function TagFilterBar({ tags, active, onToggle, onClear }) {
+function TagFilterBar({ tags, active, onToggle, onClear, labelsExpanded, onToggleLabels }) {
   return (
     <section className="tagfilter glass" aria-label="Filtrar por tag">
       <span className="tagfilter__label"><Icon name="tag" width="14" height="14" /> Filtrar</span>
@@ -688,6 +777,11 @@ function TagFilterBar({ tags, active, onToggle, onClear }) {
           <Icon name="x" /> Limpar
         </button>
       )}
+      <button type="button" className="btn btn--ghost tagfilter__labels" onClick={onToggleLabels}
+              aria-pressed={labelsExpanded}
+              title={labelsExpanded ? "Recolher etiquetas nos cards" : "Expandir etiquetas nos cards"}>
+        <Icon name="tags" /> {labelsExpanded ? "Etiquetas: nomes" : "Etiquetas: barras"}
+      </button>
     </section>
   );
 }
@@ -730,7 +824,7 @@ function ReminderBanner({ reminders, notifPerm, onEnable, onDismiss }) {
 }
 
 /* ----------------------------------------------------------------- TOPBAR */
-function Topbar({ board, boards, menuOpen, setMenuOpen, onSwitch, onNewBoard, onRenameBoard, onDeleteBoard, canDelete, trashCount, onOpenTrash }) {
+function Topbar({ board, boards, menuOpen, setMenuOpen, onSwitch, onNewBoard, onRenameBoard, onDeleteBoard, canDelete, trashCount, onOpenTrash, onOpenBg }) {
   return (
     <header className="topbar glass">
       <div className="brand">
@@ -742,6 +836,12 @@ function Topbar({ board, boards, menuOpen, setMenuOpen, onSwitch, onNewBoard, on
       </div>
 
       <div className="topbar__spacer" />
+
+      <button className="trash-btn bg-btn" title="Fundo do quadro" onClick={onOpenBg}
+              aria-label="Personalizar o fundo do quadro">
+        <Icon name="image" />
+        <span className="trash-btn__text">Fundo</span>
+      </button>
 
       <button className="trash-btn" title="Lixeira" onClick={onOpenTrash}
               aria-label={`Abrir lixeira${trashCount ? `, ${trashCount} ${trashCount === 1 ? "item" : "itens"}` : " (vazia)"}`}>
@@ -799,20 +899,64 @@ function Topbar({ board, boards, menuOpen, setMenuOpen, onSwitch, onNewBoard, on
 }
 
 /* ----------------------------------------------------------------- COLUNA */
-function Column({ quad, cards, tagById, filter, onAdd, onEdit, onDelete, onToggleComplete, onMoveKeyboard, dragRef, onDropCard }) {
+function Column({ quad, cards, tagById, filter, labelsExpanded, onToggleLabels, onOpenEditor, onQuickAdd, onEdit, onDelete, onToggleComplete, onMoveKeyboard, onReorderKeyboard, dragRef, onDropCard }) {
   const [over, setOver] = useState(false);
+  const [overIndex, setOverIndex] = useState(null); // posição do placeholder
+  const [composing, setComposing] = useState(false); // composer inline aberto
+  const [draft, setDraft] = useState("");
   const count = useCountUp(cards.length);
   const maxRef = useRef(1);
   maxRef.current = Math.max(maxRef.current, cards.length, 1);
+  const listRef = useRef(null);
+  const taRef = useRef(null);
 
   const hasFilter = filter && filter.length > 0;
   const visible = hasFilter
     ? cards.filter(c => (c.tags || []).some(id => filter.includes(id)))
     : cards;
 
-  const onDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (!over) setOver(true); };
-  const onDragLeave = (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOver(false); };
-  const onDrop = (e) => { e.preventDefault(); setOver(false); onDropCard(quad.id, null); };
+  /* calcula em qual índice cair, olhando a posição do ponteiro sobre os cards */
+  const computeIndex = (clientY) => {
+    if (hasFilter || !listRef.current) return null; // com filtro ativo, cai no fim (seguro)
+    const els = [...listRef.current.querySelectorAll("[data-card]")];
+    for (let i = 0; i < els.length; i++) {
+      const r = els[i].getBoundingClientRect();
+      if (clientY < r.top + r.height / 2) return i;
+    }
+    return els.length;
+  };
+
+  const onDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (!over) setOver(true);
+    const idx = computeIndex(e.clientY);
+    setOverIndex(prev => (prev === idx ? prev : idx));
+  };
+  const onDragLeave = (e) => {
+    if (!e.currentTarget.contains(e.relatedTarget)) { setOver(false); setOverIndex(null); }
+  };
+  const onDrop = (e) => {
+    e.preventDefault();
+    const idx = computeIndex(e.clientY);
+    setOver(false); setOverIndex(null);
+    onDropCard(quad.id, hasFilter ? null : idx);
+  };
+
+  const openComposer = () => { setComposing(true); setTimeout(() => taRef.current && taRef.current.focus(), 0); };
+  const submitDraft = () => {
+    const t = draft.trim();
+    if (!t) return;
+    onQuickAdd(t);
+    setDraft("");
+    setTimeout(() => taRef.current && taRef.current.focus(), 0); // mantém aberto (estilo Trello)
+  };
+  const onDraftKey = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitDraft(); }
+    else if (e.key === "Escape") { e.preventDefault(); setComposing(false); setDraft(""); }
+  };
+
+  const ghost = <div className="card-ghost" aria-hidden="true" />;
 
   return (
     <section
@@ -832,37 +976,70 @@ function Column({ quad, cards, tagById, filter, onAdd, onEdit, onDelete, onToggl
         </div>
       </div>
 
-      <button className="column__add" onClick={onAdd} aria-label={`Adicionar card em ${quad.title}`}>
-        <Icon name="plus" width="15" height="15" /> Novo card
-      </button>
+      {composing ? (
+        <div className="composer">
+          <textarea
+            ref={taRef}
+            className="composer__input"
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={onDraftKey}
+            placeholder="Digite um título para este cartão..."
+            rows={2}
+            maxLength={200}
+            aria-label={`Título do novo cartão em ${quad.title}`}
+          />
+          <div className="composer__row">
+            <button type="button" className="btn btn--primary composer__add" onClick={submitDraft}>
+              <Icon name="plus" width="14" height="14" /> Adicionar cartão
+            </button>
+            <button type="button" className="icon-btn" aria-label="Fechar criação rápida"
+                    onClick={() => { setComposing(false); setDraft(""); }}><Icon name="x" /></button>
+            <button type="button" className="composer__more" title="Abrir editor completo"
+                    onClick={() => { onOpenEditor(draft.trim()); setComposing(false); setDraft(""); }}>
+              <Icon name="edit" width="13" height="13" /> Detalhes
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button className="column__add" onClick={openComposer} aria-label={`Adicionar cartão em ${quad.title}`}>
+          <Icon name="plus" width="15" height="15" /> Novo card
+        </button>
+      )}
 
-      <div className="column__list">
+      <div className="column__list" ref={listRef}>
         {visible.length === 0 && !over && (
           <div className="column__empty">
             {hasFilter ? "Nenhum card com essa tag" : "Sem missões neste quadrante"}
           </div>
         )}
-        <div className="column__drop-hint">soltar aqui ↓</div>
-        {visible.map(card => (
-          <Card
-            key={card.id}
-            card={card}
-            quadId={quad.id}
-            tagById={tagById}
-            onEdit={() => onEdit(card)}
-            onDelete={() => onDelete(card.id)}
-            onToggleComplete={() => onToggleComplete(card.id)}
-            onMoveKeyboard={(dir) => onMoveKeyboard(card.id, dir)}
-            dragRef={dragRef}
-          />
+        {visible.length === 0 && over && ghost}
+        {visible.map((card, i) => (
+          <React.Fragment key={card.id}>
+            {over && overIndex === i && ghost}
+            <Card
+              card={card}
+              quadId={quad.id}
+              tagById={tagById}
+              labelsExpanded={labelsExpanded}
+              onToggleLabels={onToggleLabels}
+              onEdit={() => onEdit(card)}
+              onDelete={() => onDelete(card.id)}
+              onToggleComplete={() => onToggleComplete(card.id)}
+              onMoveKeyboard={(dir) => onMoveKeyboard(card.id, dir)}
+              onReorderKeyboard={(dir) => onReorderKeyboard(card.id, dir)}
+              dragRef={dragRef}
+            />
+          </React.Fragment>
         ))}
+        {over && overIndex === visible.length && visible.length > 0 && ghost}
       </div>
     </section>
   );
 }
 
 /* ------------------------------------------------------------------- CARD */
-function Card({ card, quadId, tagById, onEdit, onDelete, onToggleComplete, onMoveKeyboard, dragRef }) {
+function Card({ card, quadId, tagById, labelsExpanded, onToggleLabels, onEdit, onDelete, onToggleComplete, onMoveKeyboard, onReorderKeyboard, dragRef }) {
   const [dragging, setDragging] = useState(false);
   const [removing, setRemoving] = useState(false);
   const due = formatDue(card.due);
@@ -871,10 +1048,10 @@ function Card({ card, quadId, tagById, onEdit, onDelete, onToggleComplete, onMov
   const hasInnerImage = card.image && !card.image.cover;
   const checklist = Array.isArray(card.checklist) ? card.checklist : [];
   const doneCount = checklist.filter(i => i.done).length;
-  const checkPct = checklist.length ? Math.round((doneCount / checklist.length) * 100) : 0;
   const cardTags = (card.tags || []).map(id => (tagById || {})[id]).filter(Boolean);
   const done = !!card.completedAt;
   const hoursLeft = done ? Math.max(0, Math.ceil((COMPLETE_TTL - (Date.now() - card.completedAt)) / 3600000)) : 0;
+  const hasBadges = due || card.description || links.length > 0 || hasInnerImage || checklist.length > 0;
 
   const handleDelete = () => { setRemoving(true); setTimeout(onDelete, 260); };
 
@@ -891,23 +1068,39 @@ function Card({ card, quadId, tagById, onEdit, onDelete, onToggleComplete, onMov
     else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); handleDelete(); }
     else if (e.key === "ArrowRight") { e.preventDefault(); onMoveKeyboard(1); }
     else if (e.key === "ArrowLeft") { e.preventDefault(); onMoveKeyboard(-1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); onReorderKeyboard(-1); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); onReorderKeyboard(1); }
     else if (e.key === "c" || e.key === "C") { e.preventDefault(); onToggleComplete(); }
   };
 
   return (
     <article
+      data-card
       className={`card ${dragging ? "dragging" : ""} ${removing ? "removing" : ""} ${cover ? "card--has-cover" : ""} ${done ? "card--done" : ""}`}
       draggable={!removing}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       tabIndex={0}
       onKeyDown={onKeyDown}
-      aria-label={`Card: ${card.title}.${done ? " Concluído." : ""} Enter para editar, C para ${done ? "reabrir" : "concluir"}, Delete para enviar à lixeira, setas esquerda/direita para mover de quadrante.`}
+      aria-label={`Card: ${card.title}.${done ? " Concluído." : ""} Enter para editar, C para ${done ? "reabrir" : "concluir"}, Delete para enviar à lixeira, setas esquerda/direita para mover de quadrante, setas para cima/baixo para reordenar.`}
     >
       {cover && (
         <div className="card__cover" style={{ backgroundImage: `url(${cover})` }} role="img"
              aria-label={`Imagem de capa de ${card.title}`}>
           <span className="card__cover-veil" aria-hidden="true" />
+        </div>
+      )}
+      {cardTags.length > 0 && (
+        <div className={`card__labels ${labelsExpanded ? "is-expanded" : ""}`}>
+          {cardTags.map(t => (
+            <button key={t.id} type="button" className="cardlabel"
+                    style={{ background: t.color, color: textOn(t.color), boxShadow: `0 0 8px ${t.color}55` }}
+                    title={t.title} draggable={false}
+                    onMouseDown={e => e.stopPropagation()}
+                    onClick={(e) => { e.stopPropagation(); onToggleLabels(); }}>
+              {labelsExpanded && <span className="cardlabel__txt">{t.title}</span>}
+            </button>
+          ))}
         </div>
       )}
       <div className="card__top">
@@ -930,15 +1123,6 @@ function Card({ card, quadId, tagById, onEdit, onDelete, onToggleComplete, onMov
           <span className="card__done-eta">lixeira em ~{hoursLeft}h</span>
         </div>
       )}
-      {cardTags.length > 0 && (
-        <div className="card__tags">
-          {cardTags.map(t => (
-            <span key={t.id} className="pilltag" style={{ background: t.color, color: textOn(t.color), boxShadow: `0 0 10px ${t.color}55` }}>
-              {t.title}
-            </span>
-          ))}
-        </div>
-      )}
       {card.description && <p className="card__desc">{card.description}</p>}
       {links.length > 0 && (
         <div className="card__links">
@@ -951,19 +1135,37 @@ function Card({ card, quadId, tagById, onEdit, onDelete, onToggleComplete, onMov
           ))}
         </div>
       )}
-      <div className="card__meta">
-        {due
-          ? <span className={`tag ${due.soon ? "tag--due-soon" : ""}`}><Icon name="calendar" /> {due.label} · {due.rel}</span>
-          : <span className="tag" style={{ opacity: .7 }}><Icon name="clock" /> sem prazo</span>}
-        {hasInnerImage && <span className="tag" title="Contém imagem"><Icon name="image" /> imagem</span>}
-        {checklist.length > 0 && (
-          <span className={`tag tag--check ${doneCount === checklist.length ? "tag--check-done" : ""}`}
-                title={`Checklist: ${doneCount} de ${checklist.length} concluídos`}>
-            <Icon name="check" /> {doneCount}/{checklist.length}
-            <span className="tag__bar" aria-hidden="true"><i style={{ width: `${checkPct}%` }} /></span>
-          </span>
-        )}
-      </div>
+      {hasBadges && (
+        <div className="card__badges">
+          {due && (
+            <span className={`badge badge--due badge--${done ? "done" : due.status}`}
+                  title={`Prazo: ${due.label} · ${due.rel}`}>
+              <Icon name="calendar" /> {due.label}
+            </span>
+          )}
+          {card.description && (
+            <span className="badge badge--soft" title="Tem descrição" aria-label="Tem descrição">
+              <Icon name="text" />
+            </span>
+          )}
+          {links.length > 0 && (
+            <span className="badge badge--soft" title={`${links.length} link${links.length > 1 ? "s" : ""}`}>
+              <Icon name="link" /> {links.length}
+            </span>
+          )}
+          {hasInnerImage && (
+            <span className="badge badge--soft" title="Contém imagem" aria-label="Contém imagem">
+              <Icon name="image" />
+            </span>
+          )}
+          {checklist.length > 0 && (
+            <span className={`badge badge--check ${doneCount === checklist.length ? "is-complete" : ""}`}
+                  title={`Checklist: ${doneCount} de ${checklist.length} concluídos`}>
+              <Icon name="check" /> {doneCount}/{checklist.length}
+            </span>
+          )}
+        </div>
+      )}
     </article>
   );
 }
@@ -972,7 +1174,7 @@ function Card({ card, quadId, tagById, onEdit, onDelete, onToggleComplete, onMov
 function CardModal({ editor, tags, onCreateTag, onUpdateTag, onDeleteTag, onClose, onSave, onChangeQuadrant }) {
   const isEdit = editor.mode === "edit";
   const c = editor.card || {};
-  const [title, setTitle] = useState(c.title || "");
+  const [title, setTitle] = useState(c.title || editor.title || "");
   const [description, setDescription] = useState(c.description || "");
   const [cardTags, setCardTags] = useState(Array.isArray(c.tags) ? c.tags : []);
   const [tagTitle, setTagTitle] = useState("");
@@ -1438,6 +1640,82 @@ function TrashModal({ trash, boards, tagById, onClose, onRestore, onPurge, onEmp
             </div>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------- MODAL DE FUNDO */
+function BackgroundModal({ current, boardName, onClose, onApply }) {
+  const [imgUrl, setImgUrl] = useState(current && current.type === "image" ? current.url : "");
+  const currentColorId = current && current.type === "color" ? current.id : (!current ? "default" : null);
+
+  useEffect(() => {
+    const onKey = e => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const pickColor = (bg) => onApply(bg.id === "default" ? null : { type: "color", id: bg.id, css: bg.css, label: bg.label });
+  const applyImage = () => {
+    const url = normalizeUrl(imgUrl);
+    if (!url) return;
+    onApply({ type: "image", url });
+  };
+
+  return (
+    <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal modal--bg" role="dialog" aria-modal="true" aria-labelledby="bgModalTitle"
+           style={{ width: "min(560px, 100%)" }}>
+        <div className="modal__glow" aria-hidden="true" />
+        <div className="modal__head">
+          <div>
+            <span className="kicker">Personalizar</span>
+            <h2 id="bgModalTitle">Fundo do quadro</h2>
+          </div>
+          <button type="button" className="icon-btn" aria-label="Fechar" onClick={onClose}><Icon name="x" /></button>
+        </div>
+
+        <div className="modal__body">
+          <div className="field">
+            <label>Cores e gradientes</label>
+            <div className="bg-grid-pick" role="group" aria-label="Escolher cor de fundo">
+              {BOARD_BGS.map(bg => (
+                <button key={bg.id} type="button"
+                        className={`bgswatch ${currentColorId === bg.id ? "is-sel" : ""}`}
+                        style={bg.css ? { backgroundImage: bg.css } : undefined}
+                        aria-pressed={currentColorId === bg.id}
+                        onClick={() => pickColor(bg)}>
+                  {bg.id === "default" && <span className="bgswatch__none">Padrão</span>}
+                  <span className="bgswatch__name">{bg.label}</span>
+                  {currentColorId === bg.id && <span className="bgswatch__check"><Icon name="check" /></span>}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="field">
+            <label>Imagem por URL</label>
+            <div className="inline-add">
+              <input className="input" value={imgUrl} placeholder="https://exemplo.com/wallpaper.jpg"
+                     onChange={e => setImgUrl(e.target.value)}
+                     onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); applyImage(); } }} />
+              <button type="button" className="btn btn--ghost" onClick={applyImage}>
+                <Icon name="image" /> Usar imagem
+              </button>
+            </div>
+            <span className="imgbox__hint">
+              Um leve véu de vidro é aplicado por cima para manter os cards e os textos sempre legíveis.
+            </span>
+          </div>
+        </div>
+
+        <div className="modal__foot">
+          <button type="button" className="btn btn--ghost" onClick={() => onApply(null)}>
+            <Icon name="undo" /> Restaurar padrão
+          </button>
+          <button type="button" className="btn btn--primary" onClick={onClose}>Concluir</button>
+        </div>
       </div>
     </div>
   );
