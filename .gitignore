@@ -1,0 +1,26 @@
+# Dependencias
+node_modules/
+
+# Variaveis de ambiente e segredos (NUNCA commitar)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# Dados sensiveis / PII (nunca versionar)
+*.sql
+!**/migrations/**/*.sql
+*.csv
+*.xlsx
+*.xls
+dump*.json
+respostas/
+uploads/
+
+# Sistema / editor
+.DS_Store
+*.log
+.vscode/
+.idea/
