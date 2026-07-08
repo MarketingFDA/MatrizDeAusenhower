@@ -20,6 +20,10 @@ const BOARD_BGS = [
   { id: "emerald",  type: "color", label: "Esmeralda",css: "linear-gradient(135deg, #0f3443, #34e89e)" },
   { id: "magma",    type: "color", label: "Magma",    css: "linear-gradient(135deg, #200122, #6f0000)" },
   { id: "graphite", type: "color", label: "Grafite",  css: "linear-gradient(135deg, #0d1117, #262b36 60%, #11151c)" },
+  { id: "amber",    type: "color", label: "Âmbar",    css: "linear-gradient(135deg, #7a5200, #f7c948 55%, #ffd23f)" },
+  { id: "hotpink",  type: "color", label: "Rosa Choque", css: "linear-gradient(135deg, #7a0f3d, #d6236f 52%, #ff2d95)" },
+  { id: "snow",     type: "color", label: "Branco",   css: "linear-gradient(135deg, #ccd2da, #f8f9fa 55%, #ffffff)" },
+  { id: "violet",   type: "color", label: "Violeta",  css: "linear-gradient(135deg, #3a0d5e, #7048e8 55%, #9775fa)" },
 ];
 
 const QUADRANTS = [
