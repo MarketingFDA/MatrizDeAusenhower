@@ -1,6 +1,6 @@
-# Eisenhower Matrix Pro — O Futuro da Produtividade
+# Matriz de Eisenhower — Fradema Consultores
 
-Single Page Application (SPA) responsiva que une um quadro **Kanban** à **Matriz de Eisenhower**, com estética **Liquid Glass futurista** (glassmorphism + brilhos neon + gradientes líquidos animados).
+Single Page Application (SPA) responsiva que une um quadro **Kanban** à **Matriz de Eisenhower**, com identidade visual **Fradema** (azul corporativo profundo, vidro sóbrio e acentos discretos).
 
 🔗 **Demo:** https://marketingfda.github.io/MatrizDeAusenhower/
 

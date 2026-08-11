@@ -42,8 +42,8 @@ const TRASH_TTL = 7 * 24 * 60 * 60 * 1000;
 
 /* Paleta de 10 cores para as tags. */
 const TAG_COLORS = [
-  "#ff3b3b", "#ff7a18", "#ffc531", "#35e07f", "#00f0ff",
-  "#2d7bff", "#b85cff", "#ff00e5", "#ff5c8a", "#8a9bb0",
+  "#e5484d", "#ff8b3d", "#f5c518", "#2fbf71", "#38bdf8",
+  "#4d8dff", "#8b5cf6", "#d6549e", "#ff5c8a", "#8494ad",
 ];
 
 /* Escolhe texto preto ou branco conforme o brilho da cor de fundo (contraste). */
@@ -97,7 +97,7 @@ function Icon({ name, ...p }) {
 function defaultState() {
   const boardId = uid();
   const tReuniao = { id: uid(), title: "Reunião", color: "#2d7bff" };
-  const tFradema = { id: uid(), title: "Fradema", color: "#00f0ff" };
+  const tFradema = { id: uid(), title: "Fradema", color: "#4d8dff" };
   return {
     activeBoardId: boardId,
     tags: [tReuniao, tFradema],
@@ -834,8 +834,8 @@ function Topbar({ board, boards, menuOpen, setMenuOpen, onSwitch, onNewBoard, on
       <div className="brand">
         <div className="brand__mark"><Icon name="target" /></div>
         <div className="brand__title">
-          <span>Eisenhower Matrix</span>
-          <h1>Pro — O Futuro da Produtividade</h1>
+          <span>Fradema Consultores</span>
+          <h1>Matriz de Eisenhower</h1>
         </div>
       </div>
 
