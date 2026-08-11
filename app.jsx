@@ -13,17 +13,17 @@ const LABELS_KEY = "emp.eisenhower.labels.v1"; // preferência global: etiquetas
    type: "color" (aplicado direto) ou "image" (URL de fundo). */
 const BOARD_BGS = [
   { id: "default",  type: "color", label: "Padrão",   css: "" },
-  { id: "aurora",   type: "color", label: "Aurora",   css: "linear-gradient(135deg, #0f2027, #203a43 45%, #2c5364)" },
-  { id: "nebula",   type: "color", label: "Nebulosa", css: "linear-gradient(135deg, #1a0033, #3a0ca3 50%, #7209b7)" },
-  { id: "sunset",   type: "color", label: "Poente",   css: "linear-gradient(135deg, #3a1c71, #d76d77 55%, #ffaf7b)" },
-  { id: "ocean",    type: "color", label: "Oceano",   css: "linear-gradient(135deg, #000428, #004e92)" },
-  { id: "emerald",  type: "color", label: "Esmeralda",css: "linear-gradient(135deg, #0f3443, #34e89e)" },
-  { id: "magma",    type: "color", label: "Magma",    css: "linear-gradient(135deg, #200122, #6f0000)" },
-  { id: "graphite", type: "color", label: "Grafite",  css: "linear-gradient(135deg, #0d1117, #262b36 60%, #11151c)" },
-  { id: "amber",    type: "color", label: "Âmbar",    css: "linear-gradient(135deg, #7a5200, #f7c948 55%, #ffd23f)" },
-  { id: "hotpink",  type: "color", label: "Rosa Choque", css: "linear-gradient(135deg, #7a0f3d, #d6236f 52%, #ff2d95)" },
-  { id: "snow",     type: "color", label: "Branco",   css: "linear-gradient(135deg, #ccd2da, #f8f9fa 55%, #ffffff)" },
-  { id: "violet",   type: "color", label: "Violeta",  css: "linear-gradient(135deg, #3a0d5e, #7048e8 55%, #9775fa)" },
+  { id: "aurora",   type: "color", label: "Aurora",   css: "linear-gradient(135deg, #e4f0ef, #dae9f2 45%, #cddfee)" },
+  { id: "nebula",   type: "color", label: "Nebulosa", css: "linear-gradient(135deg, #ece7f6, #e0daf3 50%, #d5cfee)" },
+  { id: "sunset",   type: "color", label: "Poente",   css: "linear-gradient(135deg, #f5e6e3, #f3ded4 55%, #f8ecdb)" },
+  { id: "ocean",    type: "color", label: "Oceano",   css: "linear-gradient(135deg, #dfeaf6, #c9dcf0)" },
+  { id: "emerald",  type: "color", label: "Esmeralda",css: "linear-gradient(135deg, #e2efe7, #cbe7da)" },
+  { id: "magma",    type: "color", label: "Magma",    css: "linear-gradient(135deg, #f4e5e5, #e9d5d5)" },
+  { id: "graphite", type: "color", label: "Grafite",  css: "linear-gradient(135deg, #edf0f3, #e0e5eb 60%, #eef1f4)" },
+  { id: "amber",    type: "color", label: "Âmbar",    css: "linear-gradient(135deg, #f8eeda, #f5e4c2 55%, #faf2e0)" },
+  { id: "hotpink",  type: "color", label: "Rosa Choque", css: "linear-gradient(135deg, #f7e3eb, #f1d4e1 52%, #f9e7ef)" },
+  { id: "snow",     type: "color", label: "Branco",   css: "linear-gradient(135deg, #eaeef2, #f8f9fa 55%, #ffffff)" },
+  { id: "violet",   type: "color", label: "Violeta",  css: "linear-gradient(135deg, #eae5f7, #ddd6f3 55%, #e9e4f8)" },
 ];
 
 const QUADRANTS = [
@@ -40,18 +40,18 @@ const COMPLETE_TTL = 48 * 60 * 60 * 1000;
 /* Prazo (ms) que um card fica na lixeira antes do expurgo definitivo: 7 dias. */
 const TRASH_TTL = 7 * 24 * 60 * 60 * 1000;
 
-/* Paleta de 10 cores para as tags. */
+/* Paleta de 10 cores para as tags — tons dessaturados, legíveis sobre branco gelo. */
 const TAG_COLORS = [
-  "#e5484d", "#ff8b3d", "#f5c518", "#2fbf71", "#38bdf8",
-  "#4d8dff", "#8b5cf6", "#d6549e", "#ff5c8a", "#8494ad",
+  "#7ea8d8", "#9bc4e2", "#8fc7b5", "#a9ce9e", "#e3c97e",
+  "#e7b08a", "#e29b9b", "#c7a7da", "#9aa8c4", "#b6c2ce",
 ];
 
-/* Escolhe texto preto ou branco conforme o brilho da cor de fundo (contraste). */
+/* Escolhe texto azul escuro ou branco conforme o brilho da cor de fundo (contraste). */
 function textOn(hex) {
   const c = (hex || "#888").replace("#", "");
   const r = parseInt(c.slice(0, 2), 16), g = parseInt(c.slice(2, 4), 16), b = parseInt(c.slice(4, 6), 16);
   const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return lum > 0.62 ? "#0a0a0f" : "#ffffff";
+  return lum > 0.58 ? "#0a192f" : "#ffffff";
 }
 
 const uid = () =>
@@ -96,8 +96,8 @@ function Icon({ name, ...p }) {
 /* ------------------------------------------------------------- persistência */
 function defaultState() {
   const boardId = uid();
-  const tReuniao = { id: uid(), title: "Reunião", color: "#2d7bff" };
-  const tFradema = { id: uid(), title: "Fradema", color: "#4d8dff" };
+  const tReuniao = { id: uid(), title: "Reunião", color: "#7ea8d8" };
+  const tFradema = { id: uid(), title: "Fradema", color: "#8fc7b5" };
   return {
     activeBoardId: boardId,
     tags: [tReuniao, tFradema],
@@ -264,7 +264,7 @@ function fileToDataURL(file, maxDim = 1400, quality = 0.82) {
         const canvas = document.createElement("canvas");
         canvas.width = width; canvas.height = height;
         const ctx = canvas.getContext("2d");
-        ctx.fillStyle = "#0d0d16";
+        ctx.fillStyle = "#f4f7f9";
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
         resolve(canvas.toDataURL("image/jpeg", quality));
@@ -767,8 +767,8 @@ function TagFilterBar({ tags, active, onToggle, onClear, labelsExpanded, onToggl
           return (
             <button key={t.id} type="button" className={`tagchip ${on ? "is-on" : ""}`}
                     aria-pressed={on}
-                    style={on ? { background: t.color, color: textOn(t.color), borderColor: "transparent", boxShadow: `0 0 12px ${t.color}66` }
-                              : { color: t.color, borderColor: `${t.color}66` }}
+                    style={on ? { background: t.color, color: textOn(t.color), borderColor: "transparent", boxShadow: `0 4px 12px ${t.color}66` }
+                              : { color: "var(--text)", borderColor: `${t.color}aa` }}
                     onClick={() => onToggle(t.id)}>
               <span className="tagchip__dot" style={{ background: t.color }} />
               {t.title}
@@ -1318,9 +1318,9 @@ function CardModal({ editor, tags, onCreateTag, onUpdateTag, onDeleteTag, onClos
                     <button type="button" className="pilltag pilltag--btn"
                             aria-pressed={on}
                             style={{ background: on ? t.color : "transparent",
-                                     color: on ? textOn(t.color) : t.color,
+                                     color: on ? textOn(t.color) : "var(--text)",
                                      borderColor: t.color,
-                                     boxShadow: on ? `0 0 10px ${t.color}55` : "none" }}
+                                     boxShadow: on ? `0 3px 10px ${t.color}55` : "none" }}
                             onClick={() => toggleCardTag(t.id)}
                             title={on ? "Remover do card" : "Aplicar ao card"}>
                       {on && <Icon name="check" width="12" height="12" />} {t.title}
