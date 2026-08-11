@@ -28,7 +28,79 @@ Single Page Application (SPA) responsiva que une um quadro **Kanban** à **Matri
 - **Criar / renomear / excluir** quadros e cards via modais com vidro líquido.
 - **HUD futurista**: contadores animados por quadrante.
 - **Persistência em `localStorage`** — os dados ficam salvos após recarregar a página.
+- **Sincronização compartilhada (opcional)** — com um backend configurado em `sync-config.js`, o time inteiro vê e edita o mesmo quadro, com indicador de status no cabeçalho. Ver a seção abaixo.
 - **Responsivo** (desktop, tablet e mobile) e **acessível** (navegação por teclado e ARIA labels).
+
+## Sincronização compartilhada
+
+Por padrão cada navegador guarda o próprio quadro no `localStorage`. Com um backend
+configurado, o time inteiro passa a ver e editar **o mesmo quadro**.
+
+### Como ligar
+
+1. Publique o backend (Web App do Google Apps Script) e copie a URL de implantação
+   (termina em `/exec`).
+2. Preencha o arquivo **`sync-config.js`** na raiz do repositório:
+
+```js
+window.MATRIZ_SYNC = { url: "https://script.google.com/macros/s/AKfycb.../exec" };
+```
+
+3. Ao abrir o app, cada pessoa informa uma vez a **chave de sincronização do time**
+   (a mesma chave para todo mundo, definida no Apps Script). Quem preferir pode clicar
+   em **"Usar somente neste computador"** e continuar 100% local.
+
+Com a `url` vazia (`""`), nada muda: o app roda offline, sem modal de chave e sem
+nenhuma requisição de rede — exatamente como antes.
+
+### Como funciona
+
+- **Contrato do backend**
+  - `GET {url}?token=CHAVE` → `{"updatedAt": <ms>, "state": <estado ou null>}`
+  - `POST {url}?token=CHAVE` (corpo `text/plain` com `{"state": <estado>}`) → `{"ok":true,"updatedAt":<ms>}`
+  - chave errada → `{"error":"unauthorized"}`
+  - As requisições são "simples" de propósito (sem headers customizados e sem
+    `Content-Type: application/json`), porque o Apps Script responde por redirect e
+    **não atende ao preflight CORS**.
+- **Primeira abertura**: se o servidor ainda estiver vazio, o estado que já existe no
+  navegador é enviado automaticamente (migração dos dados atuais). Se o servidor tiver
+  um estado mais novo, ele é aplicado na tela.
+- **Ao editar**: qualquer alteração é enviada 2 segundos depois da última mexida
+  (debounce), para não disparar uma requisição por tecla.
+- **Ao receber**: o app consulta o servidor a cada 10 segundos e aplica o que for mais
+  recente. A consulta **pausa quando a aba não está visível** e o estado recebido fica
+  **segurado enquanto um modal de edição está aberto** (só é aplicado ao fechar), para
+  não apagar o que a pessoa está digitando.
+- **Sem internet**: o app continua funcionando com os dados locais, o indicador mostra
+  "Offline — dados locais" e o envio pendente é refeito sozinho quando a rede volta.
+- **Qual quadro está aberto** é preferência de cada pessoa: receber uma atualização do
+  time não muda o quadro que você está olhando.
+
+### Indicador no cabeçalho
+
+| Estado | Significado |
+|---|---|
+| ✓ Sincronizado | tudo salvo no servidor do time (o tooltip mostra o horário) |
+| Salvando… | alteração a caminho do servidor |
+| Offline — dados locais | servidor inacessível; nada foi perdido, será reenviado |
+| Sem chave — dados locais | modo local; clique no indicador para entrar com a chave |
+
+### Limitação conhecida (last-write-wins)
+
+A sincronização grava **o estado inteiro** e o último envio sobrescreve tudo
+(*last-write-wins*), sem mesclagem por card. Na prática: se duas pessoas editarem no
+mesmo intervalo de poucos segundos, a alteração de uma pode ser sobrescrita pela da
+outra. É adequado para um time pequeno, com poucas edições simultâneas; não é um
+sistema colaborativo em tempo real.
+
+### Trocar a chave ou o servidor
+
+- **Chave**: fica em `localStorage`, na chave `emp.sync.key` (o carimbo do último estado
+  conhecido fica em `emp.sync.lastSeen` e a opção de ficar local em `emp.sync.localOnly`).
+  Para trocar, clique no indicador quando estiver em modo local, ou limpe a chave pelo
+  console do navegador: `localStorage.removeItem('emp.sync.key')` e recarregue.
+- **Servidor**: edite a `url` em `sync-config.js` (e publique). Depois de trocar de
+  servidor, vale limpar também o `emp.sync.lastSeen` de cada máquina.
 
 ## Atalhos de teclado (em um card focado)
 
@@ -55,7 +127,8 @@ python3 -m http.server 8000
 ## Estrutura
 
 ```
-index.html    # marca, fontes, camadas de fundo, carga do React/Babel
-styles.css    # todo o sistema visual Liquid Glass
-app.jsx       # aplicação React (estado, drag&drop, modais, persistência)
+index.html      # marca, fontes, camadas de fundo, carga do React/Babel
+styles.css      # todo o sistema visual Liquid Glass
+app.jsx         # aplicação React (estado, drag&drop, modais, persistência, sincronização)
+sync-config.js  # url do backend compartilhado (vazia = 100% local)
 ```

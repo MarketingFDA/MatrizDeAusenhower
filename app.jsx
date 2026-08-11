@@ -84,6 +84,8 @@ function Icon({ name, ...p }) {
     tag:      <g><path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9-9-9Z"/><circle cx="7.5" cy="7.5" r="1.3"/></g>,
     text:     <g><path d="M4 6h16M4 12h12M4 18h16"/></g>,
     tags:     <g><path d="M4 8h16M4 13h16M4 18h16"/></g>,
+    cloud:    <path d="M7 18.5h10a4 4 0 0 0 .7-7.94A6 6 0 0 0 5.6 11.2 3.65 3.65 0 0 0 7 18.5Z" />,
+    cloudOff: <g><path d="M7 18.5h10a4 4 0 0 0 .7-7.94A6 6 0 0 0 5.6 11.2 3.65 3.65 0 0 0 7 18.5Z"/><path d="M4 4.5 20 19.5"/></g>,
   };
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
@@ -122,22 +124,28 @@ function soon(days) {
   return d.toISOString().slice(0, 10);
 }
 
+/* Valida e conserta um estado vindo de fora (localStorage ou servidor de sync).
+   Devolve null quando o objeto não serve como estado do app. */
+function sanitizeState(parsed) {
+  if (!parsed || typeof parsed !== "object") return null;
+  if (!Array.isArray(parsed.boards) || !parsed.boards.length) return null;
+  if (!Array.isArray(parsed.tags)) parsed.tags = []; // biblioteca de tags (defensivo)
+  if (!Array.isArray(parsed.trash)) parsed.trash = []; // lixeira (defensivo, sem migração)
+  // sanea: garante os 4 quadrantes em cada quadro
+  parsed.boards.forEach(b => {
+    b.cards = b.cards || {};
+    QUAD_IDS.forEach(q => { if (!Array.isArray(b.cards[q])) b.cards[q] = []; });
+  });
+  if (!parsed.boards.find(b => b.id === parsed.activeBoardId))
+    parsed.activeBoardId = parsed.boards[0].id;
+  return parsed;
+}
+
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return defaultState();
-    const parsed = JSON.parse(raw);
-    if (!parsed.boards || !parsed.boards.length) return defaultState();
-    if (!Array.isArray(parsed.tags)) parsed.tags = []; // biblioteca de tags (defensivo)
-    if (!Array.isArray(parsed.trash)) parsed.trash = []; // lixeira (defensivo, sem migração)
-    // sanea: garante os 4 quadrantes em cada quadro
-    parsed.boards.forEach(b => {
-      b.cards = b.cards || {};
-      QUAD_IDS.forEach(q => { if (!Array.isArray(b.cards[q])) b.cards[q] = []; });
-    });
-    if (!parsed.boards.find(b => b.id === parsed.activeBoardId))
-      parsed.activeBoardId = parsed.boards[0].id;
-    return parsed;
+    return sanitizeState(JSON.parse(raw)) || defaultState();
   } catch (e) {
     console.warn("Falha ao ler localStorage, iniciando do zero.", e);
     return defaultState();
@@ -307,6 +315,337 @@ function useCountUp(value) {
   return display;
 }
 
+/* ======================================= SINCRONIZAÇÃO COMPARTILHADA (time) ==
+   Backend: Web App do Google Apps Script (ver sync-config.js).
+     GET  {url}?token=CHAVE            -> {updatedAt, state|null} | {error:"unauthorized"}
+     POST {url}?token=CHAVE body texto -> {ok:true, updatedAt}
+   Regras de rede (Apps Script responde por redirect 302 para
+   script.googleusercontent.com): seguir redirect (padrão) e manter a
+   requisição "simples" — NENHUM header customizado e nada de
+   Content-Type: application/json, senão o navegador dispara o preflight
+   OPTIONS, que o Apps Script não responde.
+   Estratégia: last-write-wins do estado inteiro (ver README).            */
+
+const SYNC_KEY_LS   = "emp.sync.key";       // chave do time (por navegador)
+const SYNC_SEEN_LS  = "emp.sync.lastSeen";  // updatedAt do último estado já conhecido
+const SYNC_LOCAL_LS = "emp.sync.localOnly"; // "1" = a pessoa optou por ficar só local
+const PUSH_DEBOUNCE = 2000;                 // espera 2s de silêncio antes de enviar
+const POLL_MS       = 10000;                // busca novidades a cada 10s
+const POLL_MS_FAST  = 1200;                 // ?syncFast=1 (uso em teste automatizado)
+
+function syncUrl() {
+  try {
+    const u = window.MATRIZ_SYNC && window.MATRIZ_SYNC.url;
+    return typeof u === "string" && u.trim() ? u.trim() : "";
+  } catch (e) { return ""; }
+}
+function syncIsFast() {
+  try { return /[?&]syncFast=1(&|$)/.test(window.location.search); } catch (e) { return false; }
+}
+function lsGet(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function lsDel(k)    { try { localStorage.removeItem(k); } catch (e) {} }
+
+function syncEndpoint(url, key, extra) {
+  const sep = url.indexOf("?") === -1 ? "?" : "&";
+  return `${url}${sep}token=${encodeURIComponent(key)}${extra || ""}`;
+}
+async function syncGet(url, key) {
+  // _ = cache-busting por query (não usar headers/cache-mode para não sair do "simple request")
+  const r = await fetch(syncEndpoint(url, key, `&_=${Date.now()}`), { method: "GET", redirect: "follow" });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+async function syncPost(url, key, state) {
+  // sem objeto headers: o fetch usa text/plain;charset=UTF-8 para body string
+  const r = await fetch(syncEndpoint(url, key), {
+    method: "POST", redirect: "follow", body: JSON.stringify({ state }),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+/* Hook único de sincronização.
+   state/setState: o estado do app;  hold: true enquanto um modal de edição
+   está aberto (segura a aplicação de estado remoto para não engolir o que a
+   pessoa está digitando). */
+function useSharedSync({ state, setState, hold }) {
+  const url = useMemo(syncUrl, []);
+  const fast = useMemo(syncIsFast, []);
+  const enabled = !!url;
+
+  const [key, setKey] = useState(() => (enabled ? lsGet(SYNC_KEY_LS, "") : ""));
+  const [localOnly, setLocalOnly] = useState(() => lsGet(SYNC_LOCAL_LS, "") === "1");
+  const [netStatus, setNetStatus] = useState("busy"); // busy | synced | offline
+  const [lastSyncAt, setLastSyncAt] = useState(null);
+  const [keyError, setKeyError] = useState("");
+
+  const active = enabled && !!key && !localOnly;
+
+  const stateRef   = useRef(state);
+  const lastSeenSt = useRef(state);          // última referência de estado já processada
+  const seenRef    = useRef(Number(lsGet(SYNC_SEEN_LS, 0)) || 0);
+  const dirtyRef   = useRef(false);          // há mudança local ainda não confirmada
+  const timerRef   = useRef(null);           // debounce do push
+  const inflight   = useRef(false);          // POST em voo
+  const booted     = useRef(false);          // boot (GET inicial) concluído
+  const skipPush   = useRef(false);          // a próxima mudança veio do servidor
+  const pendingRem = useRef(null);           // estado remoto segurado por modal aberto
+  const holdRef    = useRef(hold);
+  useEffect(() => { stateRef.current = state; }, [state]);
+
+  const markSeen = useCallback((at) => {
+    seenRef.current = at;
+    lsSet(SYNC_SEEN_LS, String(at));
+  }, []);
+
+  /* chave recusada pelo servidor: apaga e reabre o modal com aviso */
+  const onUnauthorized = useCallback(() => {
+    lsDel(SYNC_KEY_LS);
+    setKey("");
+    setKeyError("Chave não reconhecida pelo servidor. Confira com o time e tente de novo.");
+  }, []);
+
+  /* aplica um estado vindo do servidor sem disparar push de volta */
+  const applyRemote = useCallback((remoteState, at) => {
+    const clean = sanitizeState(remoteState);
+    if (!clean) return false;
+    // o quadro aberto é preferência de quem está olhando, não do time
+    const cur = stateRef.current;
+    if (cur && clean.boards.some(b => b.id === cur.activeBoardId)) clean.activeBoardId = cur.activeBoardId;
+    skipPush.current = true;
+    setState(clean);
+    markSeen(at);
+    return true;
+  }, [setState, markSeen]);
+
+  const doPush = useCallback(async () => {
+    if (!active || inflight.current) return;
+    inflight.current = true;
+    setNetStatus("busy");
+    try {
+      const res = await syncPost(url, key, stateRef.current);
+      if (res && res.error === "unauthorized") { onUnauthorized(); return; }
+      const at = Number(res && res.updatedAt) || Date.now();
+      markSeen(at);
+      dirtyRef.current = false;
+      setNetStatus("synced");
+      setLastSyncAt(Date.now());
+    } catch (e) {
+      dirtyRef.current = true;  // segue local e tenta de novo no próximo ciclo
+      setNetStatus("offline");
+    } finally {
+      inflight.current = false;
+    }
+  }, [active, url, key, markSeen, onUnauthorized]);
+
+  /* ---- boot: primeiro GET (e migração do estado local, se o servidor estiver vazio) */
+  useEffect(() => {
+    if (!active) { booted.current = false; return; }
+    let dead = false;
+    booted.current = false;
+    setNetStatus("busy");
+    (async () => {
+      try {
+        const res = await syncGet(url, key);
+        if (dead) return;
+        if (res && res.error === "unauthorized") { onUnauthorized(); return; }
+        const at = Number(res && res.updatedAt) || 0;
+        const remote = res && res.state ? sanitizeState(res.state) : null;
+        if (remote) {
+          if (at > seenRef.current) applyRemote(remote, at);
+          else markSeen(Math.max(seenRef.current, at));
+          setNetStatus("synced");
+          setLastSyncAt(Date.now());
+        } else {
+          booted.current = true;          // servidor vazio: manda o que já existe aqui
+          await doPush();
+          return;
+        }
+      } catch (e) {
+        if (!dead) setNetStatus("offline");
+      } finally {
+        if (!dead) booted.current = true;
+      }
+    })();
+    return () => { dead = true; };
+  }, [active, url, key, applyRemote, markSeen, onUnauthorized, doPush]);
+
+  /* ---- push: qualquer mudança de estado -> debounce de 2s -> POST */
+  useEffect(() => {
+    if (state === lastSeenSt.current) return;  // mesma referência: nada mudou
+    lastSeenSt.current = state;
+    if (!active) return;
+    if (skipPush.current) { skipPush.current = false; return; } // mudança veio do servidor
+    if (!booted.current) return;                                 // ainda carregando
+    dirtyRef.current = true;
+    setNetStatus("busy");
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => { timerRef.current = null; doPush(); }, PUSH_DEBOUNCE);
+  }, [state, active, doPush]);
+
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
+  /* ---- poll: busca novidades (pausado com a aba escondida) */
+  useEffect(() => {
+    if (!active) return;
+    let dead = false;
+    const tick = async () => {
+      if (dead || document.hidden) return;
+      if (!booted.current) return;
+      if (timerRef.current || inflight.current) return; // push pendente tem prioridade
+      if (dirtyRef.current) { doPush(); return; }       // retry de um envio que falhou
+      try {
+        const res = await syncGet(url, key);
+        if (dead) return;
+        if (res && res.error === "unauthorized") { onUnauthorized(); return; }
+        const at = Number(res && res.updatedAt) || 0;
+        if (at > seenRef.current && res.state) {
+          if (holdRef.current) pendingRem.current = { state: res.state, at }; // modal aberto: segura
+          else applyRemote(res.state, at);
+        }
+        setNetStatus("synced");
+        setLastSyncAt(Date.now());
+      } catch (e) {
+        if (!dead) setNetStatus("offline");
+      }
+    };
+    const iv = setInterval(tick, fast ? POLL_MS_FAST : POLL_MS);
+    const onVis = () => { if (!document.hidden) tick(); }; // volta a olhar assim que a aba reaparece
+    document.addEventListener("visibilitychange", onVis);
+    return () => { dead = true; clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+  }, [active, url, key, fast, applyRemote, doPush, onUnauthorized]);
+
+  /* ---- fim da edição: aplica o estado remoto que ficou segurado */
+  useEffect(() => {
+    holdRef.current = hold;
+    if (hold || !pendingRem.current) return;
+    const p = pendingRem.current;
+    pendingRem.current = null;
+    // se a pessoa acabou de mudar algo, o envio dela vence (last-write-wins)
+    if (dirtyRef.current || timerRef.current || inflight.current) return;
+    if (p.at > seenRef.current) { applyRemote(p.state, p.at); setLastSyncAt(Date.now()); }
+  }, [hold, applyRemote]);
+
+  /* ---- ações do modal de chave */
+  const submitKey = useCallback((raw) => {
+    const v = (raw || "").trim();
+    if (!v) { setKeyError("Informe a chave combinada com o time."); return; }
+    setKeyError("");
+    lsSet(SYNC_KEY_LS, v);
+    lsDel(SYNC_LOCAL_LS);
+    setLocalOnly(false);
+    setKey(v);
+  }, []);
+  const useLocalOnly = useCallback(() => {
+    lsSet(SYNC_LOCAL_LS, "1");
+    setLocalOnly(true);
+    setKeyError("");
+  }, []);
+  const askKey = useCallback(() => {   // reabrir o modal a partir do indicador
+    lsDel(SYNC_LOCAL_LS);
+    lsDel(SYNC_KEY_LS);
+    setLocalOnly(false);
+    setKey("");
+    setKeyError("");
+  }, []);
+
+  const status = !enabled ? "off" : (!key || localOnly ? "nokey" : netStatus);
+
+  return {
+    status,
+    lastSyncAt,
+    keyError,
+    needKey: enabled && !key && !localOnly,
+    submitKey,
+    useLocalOnly,
+    askKey,
+  };
+}
+
+/* ------------------------------------------- INDICADOR DE STATUS (topbar) */
+function SyncStatus({ status, lastSyncAt, onAskKey }) {
+  if (status === "off") return null; // sem url configurada: nada aparece
+  const map = {
+    synced:  { cls: "is-ok",      icon: "check",    text: "Sincronizado" },
+    busy:    { cls: "is-busy",    icon: "cloud",    text: "Salvando…" },
+    offline: { cls: "is-offline", icon: "cloudOff", text: "Offline — dados locais" },
+    nokey:   { cls: "is-nokey",   icon: "cloudOff", text: "Sem chave — dados locais" },
+  };
+  const s = map[status] || map.busy;
+  const when = lastSyncAt
+    ? new Date(lastSyncAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    : null;
+  const title = status === "nokey"
+    ? "Os dados ficam só neste computador. Clique para entrar com a chave do time."
+    : status === "offline"
+      ? `Sem conexão com o servidor do time. As alterações continuam salvas aqui${when ? ` (última sincronização às ${when})` : ""}.`
+      : when ? `Última sincronização às ${when}` : "Sincronizando com o time…";
+  const inner = (
+    <>
+      <Icon name={s.icon} />
+      <span className="sync-pill__text">{s.text}</span>
+    </>
+  );
+  if (status === "nokey")
+    return (
+      <button type="button" className={`sync-pill ${s.cls}`} title={title}
+              aria-label={`${s.text}. Clique para entrar com a chave do time.`} onClick={onAskKey}>
+        {inner}
+      </button>
+    );
+  return (
+    <span className={`sync-pill ${s.cls}`} title={title} role="status" aria-label={s.text}>
+      {inner}
+    </span>
+  );
+}
+
+/* ------------------------------------------------- MODAL DA CHAVE DO TIME */
+function SyncKeyModal({ error, onSubmit, onLocalOnly }) {
+  const [value, setValue] = useState("");
+  const ref = useRef(null);
+  useEffect(() => { ref.current && ref.current.focus(); }, []);
+  useEffect(() => {
+    const onKey = e => { if (e.key === "Escape") onLocalOnly(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onLocalOnly]);
+
+  return (
+    <div className="overlay">
+      <form className="modal" role="dialog" aria-modal="true" aria-labelledby="syncModalTitle"
+            style={{ width: "min(440px,100%)" }}
+            onSubmit={(e) => { e.preventDefault(); onSubmit(value); }}>
+        <div className="modal__glow" aria-hidden="true" />
+        <div className="modal__head">
+          <div>
+            <span className="kicker">Sincronização</span>
+            <h2 id="syncModalTitle">Chave de sincronização do time</h2>
+          </div>
+        </div>
+        <p className="sync-note">
+          Com a chave, este computador passa a ver e salvar o mesmo quadro de todo o time.
+          Sem ela, os cards continuam funcionando normalmente, só que guardados apenas aqui.
+        </p>
+        <div className="field">
+          <label htmlFor="sync-key">Chave</label>
+          <input id="sync-key" ref={ref} className="input" type="password" value={value}
+                 autoComplete="off" spellCheck="false" placeholder="Cole aqui a chave combinada"
+                 onChange={e => setValue(e.target.value)} />
+          {error && <div className="field-error">{error}</div>}
+        </div>
+        <div className="modal__foot">
+          <button type="button" className="btn btn--ghost" onClick={onLocalOnly}>
+            Usar somente neste computador
+          </button>
+          <button type="submit" className="btn btn--primary">Entrar</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 /* ================================================================== APP === */
 function App() {
   const [state, setState] = useState(loadState);
@@ -325,6 +664,14 @@ function App() {
     try { return localStorage.getItem(LABELS_KEY) === "1"; } catch (e) { return false; }
   });
   const dragRef = useRef(null); // {cardId, from}
+
+  /* sincronização compartilhada com o time (inerte quando sync-config.js está vazio).
+     `hold` evita aplicar estado remoto por cima de um modal aberto (texto sendo digitado). */
+  const sync = useSharedSync({
+    state,
+    setState,
+    hold: !!editor || !!boardDialog || bgOpen || trashOpen,
+  });
 
   /* preferência global compacto/expandido das etiquetas (persistida à parte) */
   useEffect(() => {
@@ -589,6 +936,7 @@ function App() {
   const createBoard = useCallback((name) => {
     const id = uid();
     setState(s => ({
+      ...s, // preserva a biblioteca de tags e a lixeira
       activeBoardId: id,
       boards: [...s.boards, { id, name, cards: { do: [], schedule: [], delegate: [], eliminate: [] } }],
     }));
@@ -605,7 +953,7 @@ function App() {
       if (s.boards.length <= 1) return s;
       const boards = s.boards.filter(b => b.id !== id);
       const activeBoardId = s.activeBoardId === id ? boards[0].id : s.activeBoardId;
-      return { activeBoardId, boards };
+      return { ...s, activeBoardId, boards }; // preserva tags e lixeira
     });
     flash("Quadro excluído");
   }, [flash]);
@@ -650,6 +998,7 @@ function App() {
         trashCount={(state.trash || []).length}
         onOpenTrash={() => setTrashOpen(true)}
         onOpenBg={() => setBgOpen(true)}
+        sync={sync}
       />
 
       {reminders.length > 0 && !bannerHidden && (
@@ -749,6 +1098,14 @@ function App() {
         />
       )}
 
+      {sync.needKey && (
+        <SyncKeyModal
+          error={sync.keyError}
+          onSubmit={sync.submitKey}
+          onLocalOnly={sync.useLocalOnly}
+        />
+      )}
+
       <div className="toast-wrap" aria-live="polite">
         {toast && <div className="toast" key={toast.id}><span className="dot" />{toast.msg}</div>}
       </div>
@@ -828,7 +1185,7 @@ function ReminderBanner({ reminders, notifPerm, onEnable, onDismiss }) {
 }
 
 /* ----------------------------------------------------------------- TOPBAR */
-function Topbar({ board, boards, menuOpen, setMenuOpen, onSwitch, onNewBoard, onRenameBoard, onDeleteBoard, canDelete, trashCount, onOpenTrash, onOpenBg }) {
+function Topbar({ board, boards, menuOpen, setMenuOpen, onSwitch, onNewBoard, onRenameBoard, onDeleteBoard, canDelete, trashCount, onOpenTrash, onOpenBg, sync }) {
   return (
     <header className="topbar glass">
       <div className="brand">
@@ -840,6 +1197,10 @@ function Topbar({ board, boards, menuOpen, setMenuOpen, onSwitch, onNewBoard, on
       </div>
 
       <div className="topbar__spacer" />
+
+      {sync && (
+        <SyncStatus status={sync.status} lastSyncAt={sync.lastSyncAt} onAskKey={sync.askKey} />
+      )}
 
       <button className="trash-btn bg-btn" title="Fundo do quadro" onClick={onOpenBg}
               aria-label="Personalizar o fundo do quadro">

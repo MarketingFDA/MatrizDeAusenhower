@@ -34,6 +34,10 @@
     </p>
   </noscript>
 
+  <!-- Configuração da sincronização compartilhada (precisa vir ANTES do app.jsx).
+       Com a url vazia, o app roda 100% local no navegador, como antes. -->
+  <script src="sync-config.js"></script>
+
   <!-- React + Babel via CDN (sem build step, ideal para GitHub Pages) -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>

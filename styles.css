@@ -1141,6 +1141,40 @@ body {
   -webkit-backdrop-filter: blur(3px) saturate(104%);
 }
 
+/* -------------------------------------------- SINCRONIZAÇÃO COMPARTILHADA */
+/* Indicador discreto na topbar: mesma linguagem de vidro do cabeçalho. */
+.sync-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: inset 0 0 0 1px rgba(10, 25, 47, 0.04);
+  font-family: var(--font-body); font-weight: 500; font-size: 12px;
+  letter-spacing: .1px; white-space: nowrap;
+  color: rgba(46, 74, 120, 0.72);
+  cursor: default;
+  transition: color .25s var(--ease), background .25s var(--ease), box-shadow .25s var(--ease);
+}
+.sync-pill svg { width: 14px; height: 14px; flex: 0 0 auto; }
+.sync-pill.is-ok      { color: var(--accent); }
+.sync-pill.is-busy    { color: rgba(46, 74, 120, 0.62); }
+.sync-pill.is-busy svg { animation: syncPulse 1.4s var(--ease) infinite; }
+.sync-pill.is-offline { color: var(--soft-amber); background: rgba(169, 124, 60, 0.08); border-color: rgba(169, 124, 60, 0.22); }
+.sync-pill.is-nokey   { color: var(--text-faint); cursor: pointer; }
+.sync-pill.is-nokey:hover { color: var(--accent); background: var(--glass-btn-hover); box-shadow: 0 6px 16px rgba(10, 25, 47, 0.08); }
+.sync-pill:focus-visible { outline: 2px solid rgba(10, 25, 47, 0.45); outline-offset: 2px; }
+@keyframes syncPulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .sync-pill.is-busy svg { animation: none; } }
+
+/* nota explicativa dentro do modal da chave */
+.sync-note {
+  margin: 0 0 16px;
+  font-family: var(--font-body); font-size: 12px; line-height: 1.6; color: var(--text-dim);
+  padding: 11px 13px; border-radius: 14px;
+  background: rgba(46, 74, 120, 0.06); border: 1px solid rgba(46, 74, 120, 0.16);
+}
+
 /* botão "Fundo" na topbar (variação do trash-btn, sem o vermelho) */
 .bg-btn:hover { color: var(--accent); box-shadow: 0 8px 20px rgba(10, 25, 47, 0.10), inset 0 0 0 1px rgba(46, 74, 120, 0.18); }
 
@@ -1310,6 +1344,11 @@ body {
   }
   .brand__title { align-items: flex-start; }
   .brand__title h1 { white-space: normal; font-size: 18px; }
+
+  /* indicador de sincronização: só o ícone (o texto vai para o tooltip/aria) */
+  .sync-pill { order: 0; width: 44px; height: 44px; padding: 0; justify-content: center; flex: 0 0 auto; }
+  .sync-pill__text { display: none; }
+  .sync-pill svg { width: 18px; height: 18px; }
 
   /* linha de ações: botões de vidro quadrados de 44px */
   .bg-btn { order: 1; }
